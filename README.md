@@ -1,6 +1,6 @@
 # R-Type Web
 
-Vanilla JavaScript shell for an R-Type-style browser game. Static site at the repo root, deployable on Vercel, with serverless API routes for player registration and score persistence.
+Vanilla JavaScript shell for an R-Type-style browser game. Static site at the repo root, deployable on Vercel, with a modular side-scrolling engine under `src/engine/` and serverless API routes for player registration and score persistence.
 
 ## Requirements
 
@@ -22,7 +22,11 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Expected result:** page title **R-Type Web**, heading **R-Type Web — shell**, status **Shell ready.** No console errors from the shell.
+**Expected result:** canvas game view boots into **Playing**. The world auto-scrolls right (content moves left on screen — R-Type rightward advance). **WASD / arrows** move the green player rect; colliding with the red obstacle transitions to **game over** (Space retries). Purple enemy rects stream from the right and despawn off-screen. No console errors.
+
+### Scroll convention
+
+Player faces / advances **+X (right)**. Camera `x` increases as the playfield streams past; see the table in `src/engine/camera.js`.
 
 > **Note:** `npm start` serves static files only (`serve`). It does **not** run `api/` handlers.
 
@@ -127,9 +131,20 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 
 ```
 .
-├── index.html              # Static entry
+├── index.html              # Static entry + canvas
 ├── src/
-│   └── main.js             # ES module entry (game code goes here later)
+│   ├── main.js             # Boot: canvas, Input, Game, Loop
+│   ├── engine/
+│   │   ├── loop.js         # Fixed-timestep rAF loop
+│   │   ├── input.js        # Keyboard + simple touch
+│   │   ├── camera.js       # World scroll / transforms
+│   │   ├── entity.js       # Entity + EntityList
+│   │   ├── collision.js    # AABB helpers
+│   │   └── game.js         # Scene state machine
+│   └── scenes/
+│       ├── menu.js
+│       ├── playing.js      # Demo: player, obstacle, scroll
+│       └── gameover.js
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
@@ -170,6 +185,6 @@ Without `LIBSQL_URL`, handlers fall back to a local file path. That is fine for 
 ## Notes
 
 - No bundler or SPA framework is required.
-- Game logic lives under `src/`.
+- Game logic lives under `src/` (engine + scenes).
 - Public media and data live under `public/assets/`.
 - Auth (passwords/OAuth) and full game UI score wiring are out of scope for the current API slice.
