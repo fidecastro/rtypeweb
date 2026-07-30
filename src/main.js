@@ -1,16 +1,35 @@
 /**
- * Title screen / main menu: leaderboard, register, scores, play mount.
+ * Title screen / main menu: leaderboard, register, scores, play (engine mount).
  */
 import { fetchLeaderboard, registerPlayer } from './api.js';
 import { loadPlayer, savePlayer } from './player.js';
+import { createLoop } from './engine/loop.js';
+import { createInput } from './engine/input.js';
+import { createGame } from './engine/game.js';
+import { createPlayingScene } from './scenes/playing.js';
+import { createMenuScene } from './scenes/menu.js';
+import { createGameOverScene } from './scenes/gameover.js';
 
 const VIEWS = ['home', 'register', 'scores', 'play'];
+const VIEW_WIDTH = 960;
+const VIEW_HEIGHT = 540;
 
 /** @type {string} */
 let currentView = 'home';
 
+/** @type {{ game: ReturnType<typeof createGame>, loop: ReturnType<typeof createLoop> } | null} */
+let engine = null;
+
 function $(id) {
   return document.getElementById(id);
+}
+
+/**
+ * @param {string} text
+ */
+function setStatus(text) {
+  const statusEl = $('status');
+  if (statusEl) statusEl.textContent = text;
 }
 
 function setPlayerBadge() {
@@ -29,6 +48,114 @@ function setPlayerBadge() {
     playHint.textContent = player
       ? `Registered pilot: ${player.nickname} — scores will use this profile.`
       : 'No profile yet — register so a later game-over can attribute your score.';
+  }
+}
+
+/**
+ * Lazily boot the side-scrolling engine into #game once.
+ * @returns {boolean}
+ */
+function ensureEngine() {
+  if (engine) return true;
+
+  const canvas = $('game');
+  if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
+    setStatus('Error: missing #game canvas');
+    console.error('[rtypeweb] #game canvas not found');
+    return false;
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    setStatus('Error: 2D context unavailable');
+    console.error('[rtypeweb] 2D context unavailable');
+    return false;
+  }
+
+  function resizeCanvas() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(VIEW_WIDTH * dpr);
+    canvas.height = Math.floor(VIEW_HEIGHT * dpr);
+    canvas.style.width = `${VIEW_WIDTH}px`;
+    canvas.style.height = `${VIEW_HEIGHT}px`;
+  }
+
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  const input = createInput({ target: window, enableTouch: true });
+
+  /** @type {ReturnType<typeof createGame> | null} */
+  let game = null;
+
+  function goPlaying() {
+    game?.invalidateScene('playing');
+    game?.setScene('playing');
+  }
+
+  function goGameOver() {
+    game?.setScene('gameover');
+  }
+
+  const sceneDeps = {
+    canvas,
+    ctx,
+    input,
+    setStatus,
+    viewWidth: VIEW_WIDTH,
+    viewHeight: VIEW_HEIGHT,
+  };
+
+  game = createGame({
+    initial: 'playing',
+    onSceneChange(name) {
+      console.log('[rtypeweb] scene →', name);
+    },
+    scenes: {
+      menu: () =>
+        createMenuScene({
+          ...sceneDeps,
+          onStart: goPlaying,
+        }),
+      playing: () =>
+        createPlayingScene({
+          ...sceneDeps,
+          onGameOver: goGameOver,
+        }),
+      gameover: () =>
+        createGameOverScene({
+          ...sceneDeps,
+          onRestart: goPlaying,
+        }),
+    },
+  });
+
+  const loop = createLoop({
+    update(dt) {
+      game?.update(dt);
+    },
+    render(alpha) {
+      game?.render(alpha);
+    },
+  });
+
+  engine = { game, loop };
+  console.log('[rtypeweb] engine ready — scene:', game.getScene());
+  return true;
+}
+
+function startPlay() {
+  if (!ensureEngine() || !engine) return;
+  if (!engine.loop.isRunning()) {
+    engine.loop.start();
+  }
+  setStatus(engine.game.getScene() === 'playing' ? 'Playing' : engine.game.getScene() || 'Play');
+  setPlayerBadge();
+}
+
+function stopPlay() {
+  if (engine?.loop.isRunning()) {
+    engine.loop.stop();
   }
 }
 
@@ -60,14 +187,18 @@ function showView(view) {
     }
   });
 
+  if (view === 'play') {
+    startPlay();
+  } else {
+    stopPlay();
+  }
+
   if (view === 'home') {
     loadAndRenderLeaderboard($('home-leaderboard'));
   } else if (view === 'scores') {
     loadAndRenderLeaderboard($('scores-leaderboard'));
   } else if (view === 'register') {
     prefillRegisterForm();
-  } else if (view === 'play') {
-    setPlayerBadge();
   }
 
   const nextHash = view === 'home' ? '#/' : `#/${view}`;

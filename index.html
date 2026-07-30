@@ -87,25 +87,29 @@
           </div>
         </section>
 
-        <!-- Play / game mount -->
+        <!-- Play / game mount (engine from DEV-149) -->
         <section id="view-play" class="view" data-view="play" hidden aria-label="Play">
           <div class="panel game-panel">
-            <h2 class="panel-title">Mission Ready</h2>
-            <p class="panel-desc">
-              Game surface mount point. Combat and HUD land in later missions.
-            </p>
+            <h2 class="panel-title">Play</h2>
+            <p id="status" class="game-status" role="status">Idle</p>
             <div id="game-root" class="game-root" aria-label="Game canvas mount">
-              <p class="game-placeholder">
-                <span class="blink">▸</span> Awaiting launch sequence…
-              </p>
+              <canvas
+                id="game"
+                width="960"
+                height="540"
+                aria-label="R-Type Web game view"
+              ></canvas>
             </div>
+            <p class="hint game-controls-hint">
+              WASD / arrows · Space fire / confirm · touch: left steer, right fire
+            </p>
             <p id="play-player-hint" class="hint"></p>
           </div>
         </section>
       </main>
 
       <footer class="app-footer">
-        <span>DEV-148 menu shell</span>
+        <span>R-Type Web · menu + engine</span>
       </footer>
     </div>
     <script type="module" src="/src/main.js"></script>

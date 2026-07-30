@@ -23,7 +23,7 @@ npm run api
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play opens the game mount (`#game-root`).
+**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` (side-scrolling demo).
 
 ### Static only
 
@@ -32,17 +32,19 @@ npm start
 # or: npm run dev
 ```
 
-Serves files only (`serve`) — **no** `api/` handlers. Leaderboard/register will show an error state; the menu shell still navigates.
+Serves files only (`serve`) — **no** `api/` handlers. Leaderboard/register will show an error state; the menu shell and Play engine still work.
 
-### Split ports
+### Split ports (loopback only)
 
-If the API runs on another origin, set once:
+If the API runs on another **localhost** origin, set once:
 
 ```js
 localStorage.setItem('rtypeweb.apiBase', 'http://localhost:3000')
 ```
 
 or open `http://localhost:PORT/?apiBase=http://localhost:3000`.
+
+Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?apiBase=` values are ignored and not stored.
 
 ## Player / score API
 
@@ -140,12 +142,14 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 
 ```
 .
-├── index.html              # Title screen / main menu shell
+├── index.html              # Title screen / main menu shell + canvas
 ├── src/
-│   ├── main.js             # Views: home, register, scores, play mount
-│   ├── api.js              # fetch helpers (relative /api, optional apiBase)
+│   ├── main.js             # Views: home, register, scores, play (engine)
+│   ├── api.js              # fetch helpers (relative /api, loopback apiBase)
 │   ├── player.js           # localStorage player identity
-│   └── styles.css          # Retro menu styling
+│   ├── styles.css          # Retro menu styling
+│   ├── engine/             # Fixed-timestep loop, input, camera, entities
+│   └── scenes/             # menu / playing / gameover stubs
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
@@ -160,9 +164,9 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── validate.js
 │   └── http.js
 ├── scripts/
-│   ├── local-api.mjs       # Local static + api/* server
+│   ├── local-api.mjs       # Local static (allowlisted) + api/* server
 │   └── smoke-api.mjs       # HTTP smoke verification
-├── data/                   # Local SQLite DB (gitignored)
+├── data/                   # Local SQLite DB (gitignored; not served statically)
 ├── vercel.json
 ├── package.json
 ├── .env.example
@@ -179,9 +183,13 @@ Runtime asset URLs (when serving from repo root) use paths like `/public/assets/
 | Title / home | `#/` | Loads `GET /api/leaderboard`; empty or top 10; menu stays usable on error |
 | Register | `#/register` | `POST /api/register` → `localStorage` `rtypeweb.player` |
 | High scores | `#/scores` | Full leaderboard + refresh |
-| Play | `#/play` | `#game-root` mount / placeholder for later game code |
+| Play | `#/play` | Boots canvas engine into `#game` (side-scrolling demo) |
 
-Auth (passwords/OAuth) and combat/HUD are out of scope for this slice.
+### Scroll convention
+
+Player faces / advances **+X (right)**. Camera `x` increases as the playfield streams past; see `src/engine/camera.js`.
+
+Auth (passwords/OAuth) and full combat/HUD polish are out of scope for this slice.
 
 ## Deploy to Vercel
 

@@ -2,8 +2,10 @@
 /**
  * Local Node runner for api/* handlers + static files (no Vercel login).
  * Usage: node scripts/local-api.mjs
- * Listens on PORT (default 3000). Serves index.html, /src/*, /public/* so the
- * menu UI and API share the same origin for browser walkthroughs.
+ * Listens on PORT (default 3000). Serves only index.html, /src/*, /public/*
+ * so the menu UI and API share the same origin for browser walkthroughs.
+ * Paths outside that allowlist (e.g. /data/*.db, /api source, node_modules)
+ * return 404.
  */
 import http from "node:http";
 import fs from "node:fs";
@@ -41,12 +43,26 @@ const MIME = {
   ".woff2": "font/woff2",
   ".map": "application/json",
   ".txt": "text/plain; charset=utf-8",
-  ".md": "text/plain; charset=utf-8",
 };
 
 /**
+ * Whether a path relative to ROOT is allowed as a static asset.
+ * Allowlist: index.html at root, anything under src/, anything under public/.
+ * @param {string} relFromRoot posix-ish relative path (no leading slash)
+ */
+function isAllowedStatic(relFromRoot) {
+  if (!relFromRoot || relFromRoot === ".") return false;
+  // normalize separators for windows-safety; repo is linux in CI
+  const rel = relFromRoot.split(path.sep).join("/");
+  if (rel === "index.html") return true;
+  if (rel.startsWith("src/") && rel !== "src/") return true;
+  if (rel.startsWith("public/") && rel !== "public/") return true;
+  return false;
+}
+
+/**
  * @param {string} urlPath
- * @returns {string | null} absolute file path or null if unsafe / missing
+ * @returns {string | null} absolute file path or null if unsafe / missing / denied
  */
 function resolveStatic(urlPath) {
   let decoded;
@@ -69,10 +85,17 @@ function resolveStatic(urlPath) {
     const st = fs.statSync(abs);
     if (st.isDirectory()) {
       const index = path.join(abs, "index.html");
-      if (fs.existsSync(index) && fs.statSync(index).isFile()) return index;
+      if (fs.existsSync(index) && fs.statSync(index).isFile()) {
+        const indexRel = path.relative(ROOT, index);
+        if (!isAllowedStatic(indexRel)) return null;
+        return index;
+      }
       return null;
     }
-    if (st.isFile()) return abs;
+    if (st.isFile()) {
+      if (!isAllowedStatic(relFromRoot)) return null;
+      return abs;
+    }
   } catch {
     return null;
   }
@@ -131,7 +154,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Static files for menu UI (GET/HEAD only)
+  // Static files for menu UI (GET/HEAD only) — allowlisted roots only
   if (method === "GET" || method === "HEAD") {
     const filePath = resolveStatic(url.pathname);
     if (filePath) {
@@ -158,7 +181,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Local app + API listening on http://localhost:${PORT}`);
-  console.log(`  Static: index.html, /src/*, /public/*`);
+  console.log(`  Static (allowlist): index.html, /src/*, /public/*`);
   console.log(`  POST /api/register`);
   console.log(`  POST /api/score`);
   console.log(`  GET  /api/leaderboard`);

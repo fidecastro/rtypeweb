@@ -35,7 +35,7 @@ body {
 }
 
 .app {
-  max-width: 40rem;
+  max-width: 62rem;
   margin: 0 auto;
   padding: 1.5rem 1rem 2rem;
   min-height: 100vh;
@@ -317,31 +317,37 @@ body {
   min-height: 14rem;
 }
 
-.game-root {
-  min-height: 10rem;
-  display: grid;
-  place-items: center;
-  border: 2px dashed var(--border);
-  background: #060a0f;
-  margin-top: 0.25rem;
-}
-
-.game-placeholder {
-  margin: 0;
+.game-status {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
   color: var(--muted);
-  font-size: 0.9rem;
   letter-spacing: 0.04em;
 }
 
-.blink {
-  color: var(--accent);
-  animation: blink 1s steps(1) infinite;
+.game-root {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 2px solid var(--border);
+  background: #060a0f;
+  margin-top: 0.25rem;
+  padding: 0.35rem;
+  overflow: hidden;
 }
 
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
+.game-root #game {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #243044;
+  border-radius: 2px;
+  background: #0b1220;
+  touch-action: none;
+  image-rendering: pixelated;
+}
+
+.game-controls-hint {
+  margin-top: 0.65rem;
 }
 
 .app-footer {
