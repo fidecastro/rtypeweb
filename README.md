@@ -13,18 +13,36 @@ Vanilla JavaScript shell for an R-Type-style browser game. Static site at the re
 npm install
 ```
 
-## Local run (static shell)
+## Local run (menu UI + API)
+
+Recommended same-origin setup (static menu + API on one port):
+
+```bash
+npm run api
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play opens the game mount (`#game-root`).
+
+### Static only
 
 ```bash
 npm start
 # or: npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Serves files only (`serve`) — **no** `api/` handlers. Leaderboard/register will show an error state; the menu shell still navigates.
 
-**Expected result:** page title **R-Type Web**, heading **R-Type Web — shell**, status **Shell ready.** No console errors from the shell.
+### Split ports
 
-> **Note:** `npm start` serves static files only (`serve`). It does **not** run `api/` handlers.
+If the API runs on another origin, set once:
+
+```js
+localStorage.setItem('rtypeweb.apiBase', 'http://localhost:3000')
+```
+
+or open `http://localhost:PORT/?apiBase=http://localhost:3000`.
 
 ## Player / score API
 
@@ -78,12 +96,7 @@ Error shape:
 
 ### Local API server
 
-Without Vercel login:
-
-```bash
-npm run api
-# listens on PORT (default 3000)
-```
+Without Vercel login, `npm run api` runs `scripts/local-api.mjs`: **API routes plus static files** on `PORT` (default 3000), so the menu UI can call relative `/api/*`.
 
 Or with the Vercel CLI (matches production routing more closely):
 
@@ -127,9 +140,12 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 
 ```
 .
-├── index.html              # Static entry
+├── index.html              # Title screen / main menu shell
 ├── src/
-│   └── main.js             # ES module entry (game code goes here later)
+│   ├── main.js             # Views: home, register, scores, play mount
+│   ├── api.js              # fetch helpers (relative /api, optional apiBase)
+│   ├── player.js           # localStorage player identity
+│   └── styles.css          # Retro menu styling
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
@@ -144,7 +160,7 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── validate.js
 │   └── http.js
 ├── scripts/
-│   ├── local-api.mjs       # Local HTTP runner for api/*
+│   ├── local-api.mjs       # Local static + api/* server
 │   └── smoke-api.mjs       # HTTP smoke verification
 ├── data/                   # Local SQLite DB (gitignored)
 ├── vercel.json
@@ -155,6 +171,17 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 ```
 
 Runtime asset URLs (when serving from repo root) use paths like `/public/assets/sprites/...`.
+
+## Menu UI notes
+
+| View | Route hash | Behavior |
+|------|------------|----------|
+| Title / home | `#/` | Loads `GET /api/leaderboard`; empty or top 10; menu stays usable on error |
+| Register | `#/register` | `POST /api/register` → `localStorage` `rtypeweb.player` |
+| High scores | `#/scores` | Full leaderboard + refresh |
+| Play | `#/play` | `#game-root` mount / placeholder for later game code |
+
+Auth (passwords/OAuth) and combat/HUD are out of scope for this slice.
 
 ## Deploy to Vercel
 
@@ -172,4 +199,4 @@ Without `LIBSQL_URL`, handlers fall back to a local file path. That is fine for 
 - No bundler or SPA framework is required.
 - Game logic lives under `src/`.
 - Public media and data live under `public/assets/`.
-- Auth (passwords/OAuth) and full game UI score wiring are out of scope for the current API slice.
+- Later missions submit scores with the stored `playerId` (`rtypeweb.player.id`).

@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 /**
- * Thin local Node runner for api/* handlers (no Vercel login required).
+ * Local Node runner for api/* handlers + static files (no Vercel login).
  * Usage: node scripts/local-api.mjs
- * Listens on PORT (default 3000).
+ * Listens on PORT (default 3000). Serves index.html, /src/*, /public/* so the
+ * menu UI and API share the same origin for browser walkthroughs.
  */
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { URL } from "node:url";
 import register from "../api/register.js";
 import score from "../api/score.js";
 import leaderboard from "../api/leaderboard.js";
 
 const PORT = Number(process.env.PORT || 3000);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, "..");
 
 const routes = {
   "POST /api/register": register,
@@ -18,10 +24,78 @@ const routes = {
   "GET /api/leaderboard": leaderboard,
 };
 
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".map": "application/json",
+  ".txt": "text/plain; charset=utf-8",
+  ".md": "text/plain; charset=utf-8",
+};
+
+/**
+ * @param {string} urlPath
+ * @returns {string | null} absolute file path or null if unsafe / missing
+ */
+function resolveStatic(urlPath) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(urlPath);
+  } catch {
+    return null;
+  }
+  let rel = decoded.split("?")[0];
+  if (rel.includes("\0")) return null;
+  // strip leading slashes so path.join keeps ROOT as base (POSIX)
+  rel = rel.replace(/^\/+/, "");
+  if (!rel) rel = "index.html";
+
+  const abs = path.normalize(path.join(ROOT, rel));
+  const relFromRoot = path.relative(ROOT, abs);
+  if (relFromRoot.startsWith("..") || path.isAbsolute(relFromRoot)) return null;
+
+  try {
+    const st = fs.statSync(abs);
+    if (st.isDirectory()) {
+      const index = path.join(abs, "index.html");
+      if (fs.existsSync(index) && fs.statSync(index).isFile()) return index;
+      return null;
+    }
+    if (st.isFile()) return abs;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * @param {import("http").ServerResponse} res
+ * @param {string} filePath
+ */
+function sendFile(res, filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const type = MIME[ext] || "application/octet-stream";
+  res.statusCode = 200;
+  res.setHeader("Content-Type", type);
+  fs.createReadStream(filePath).pipe(res);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  const key = `${(req.method || "GET").toUpperCase()} ${url.pathname.replace(/\/$/, "") || "/"}`;
-  // allow trailing-slash-free match; also try without method for 405 detection
+  const pathname = url.pathname.replace(/\/$/, "") || "/";
+  const method = (req.method || "GET").toUpperCase();
+  const key = `${method} ${pathname}`;
   const handler = routes[key];
 
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -34,36 +108,57 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (!handler) {
-    // method not allowed for known path
-    const pathOnly = url.pathname.replace(/\/$/, "") || "/";
-    const knownPaths = ["/api/register", "/api/score", "/api/leaderboard"];
-    if (knownPaths.includes(pathOnly)) {
-      res.statusCode = 405;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(JSON.stringify({ error: "Method not allowed", code: "METHOD_NOT_ALLOWED" }));
-      return;
+  if (handler) {
+    try {
+      await handler(req, res);
+    } catch (err) {
+      console.error(err);
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ error: "Internal server error", code: "INTERNAL_ERROR" }));
+      }
     }
-    res.statusCode = 404;
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.end(JSON.stringify({ error: "Not found", code: "NOT_FOUND" }));
     return;
   }
 
-  try {
-    await handler(req, res);
-  } catch (err) {
-    console.error(err);
-    if (!res.headersSent) {
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(JSON.stringify({ error: "Internal server error", code: "INTERNAL_ERROR" }));
-    }
+  // method not allowed for known API paths
+  const knownPaths = ["/api/register", "/api/score", "/api/leaderboard"];
+  if (knownPaths.includes(pathname)) {
+    res.statusCode = 405;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ error: "Method not allowed", code: "METHOD_NOT_ALLOWED" }));
+    return;
   }
+
+  // Static files for menu UI (GET/HEAD only)
+  if (method === "GET" || method === "HEAD") {
+    const filePath = resolveStatic(url.pathname);
+    if (filePath) {
+      if (method === "HEAD") {
+        const ext = path.extname(filePath).toLowerCase();
+        res.statusCode = 200;
+        res.setHeader("Content-Type", MIME[ext] || "application/octet-stream");
+        res.end();
+        return;
+      }
+      sendFile(res, filePath);
+      return;
+    }
+    res.statusCode = 404;
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.end("Not found");
+    return;
+  }
+
+  res.statusCode = 404;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify({ error: "Not found", code: "NOT_FOUND" }));
 });
 
 server.listen(PORT, () => {
-  console.log(`Local API listening on http://localhost:${PORT}`);
+  console.log(`Local app + API listening on http://localhost:${PORT}`);
+  console.log(`  Static: index.html, /src/*, /public/*`);
   console.log(`  POST /api/register`);
   console.log(`  POST /api/score`);
   console.log(`  GET  /api/leaderboard`);
