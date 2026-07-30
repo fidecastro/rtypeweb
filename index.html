@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>R-Type Web</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        background: #0b0f14;
+        color: #e8eef5;
+      }
+      main {
+        text-align: center;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      p {
+        margin: 0;
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">R-Type Web — shell</h1>
+      <p id="status">Loading…</p>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
