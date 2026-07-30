@@ -1,6 +1,6 @@
 /**
- * Boot: canvas + Input + Game + Loop. Default path enters playing demo quickly.
- * Scroll convention: R-Type rightward advance — see src/engine/camera.js.
+ * Boot: canvas + Input + Game + Loop.
+ * Shared runState bridges playing → gameover score handoff.
  */
 
 import { createLoop } from './engine/loop.js';
@@ -55,6 +55,11 @@ window.addEventListener('resize', resizeCanvas);
 
 const input = createInput({ target: window, enableTouch: true });
 
+/** Shared across scenes for last-run score. */
+const runState = {
+  lastScore: 0,
+};
+
 /** @type {ReturnType<typeof createGame> | null} */
 let game = null;
 
@@ -64,10 +69,18 @@ function goPlaying() {
 }
 
 function goMenu() {
+  game?.invalidateScene('menu');
   game?.setScene('menu');
 }
 
-function goGameOver() {
+/**
+ * @param {{ score?: number }} [payload]
+ */
+function goGameOver(payload) {
+  if (payload && typeof payload.score === 'number') {
+    runState.lastScore = payload.score;
+  }
+  game?.invalidateScene('gameover');
   game?.setScene('gameover');
 }
 
@@ -81,7 +94,7 @@ const sceneDeps = {
 };
 
 game = createGame({
-  initial: 'playing',
+  initial: 'menu',
   onSceneChange(name) {
     console.log('[rtypeweb] scene →', name);
   },
@@ -94,12 +107,15 @@ game = createGame({
     playing: () =>
       createPlayingScene({
         ...sceneDeps,
+        runState,
         onGameOver: goGameOver,
       }),
     gameover: () =>
       createGameOverScene({
         ...sceneDeps,
+        getLastScore: () => runState.lastScore,
         onRestart: goPlaying,
+        onMenu: goMenu,
       }),
   },
 });
@@ -114,5 +130,5 @@ const loop = createLoop({
 });
 
 loop.start();
-setStatus('Playing');
+setStatus('Menu');
 console.log('[rtypeweb] engine booted — scene:', game.getScene());

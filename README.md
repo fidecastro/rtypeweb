@@ -22,13 +22,28 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Expected result:** canvas game view boots into **Playing**. The world auto-scrolls right (content moves left on screen — R-Type rightward advance). **WASD / arrows** move the green player rect; colliding with the red obstacle transitions to **game over** (Space retries). Purple enemy rects stream from the right and despawn off-screen. No console errors.
+**Expected result:** canvas boots into **Menu**. Register (optional) via the form under the canvas, then **Space / Enter** to play. The world auto-scrolls right (R-Type rightward advance). **WASD / arrows** move the green ship; **Space** fires cyan projectiles (rate-limited). Health gauge and score are on the HUD. Hazards (red obstacle, purple enemies) deal damage with a short invulnerability window; at 0 HP → **Game Over** with final score. **Space** retries; **Esc / M** returns to menu. Debug keys while playing: **H** = take 1 damage, **G** = +100 score.
 
 ### Scroll convention
 
 Player faces / advances **+X (right)**. Camera `x` increases as the playfield streams past; see the table in `src/engine/camera.js`.
 
-> **Note:** `npm start` serves static files only (`serve`). It does **not** run `api/` handlers.
+### Full local play (game + API)
+
+`npm start` serves static files only (`serve`) and does **not** run `api/` handlers. For register + score submit from the browser, use the local API runner (now also serves static):
+
+```bash
+npm run api
+# open http://localhost:3000
+```
+
+Or `npm run dev:vercel` if you prefer the Vercel CLI.
+
+### Game module smoke
+
+```bash
+npm run smoke:game
+```
 
 ## Player / score API
 
@@ -131,9 +146,9 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 
 ```
 .
-├── index.html              # Static entry + canvas
+├── index.html              # Static entry + canvas + register form
 ├── src/
-│   ├── main.js             # Boot: canvas, Input, Game, Loop
+│   ├── main.js             # Boot: canvas, Input, Game, Loop, runState
 │   ├── engine/
 │   │   ├── loop.js         # Fixed-timestep rAF loop
 │   │   ├── input.js        # Keyboard + simple touch
@@ -141,10 +156,14 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   │   ├── entity.js       # Entity + EntityList
 │   │   ├── collision.js    # AABB helpers
 │   │   └── game.js         # Scene state machine
+│   ├── game/
+│   │   ├── player.js       # Ship movement, HP, fire cooldown
+│   │   ├── score.js        # Per-run score API
+│   │   └── apiClient.js    # register / submitScore + localStorage
 │   └── scenes/
-│       ├── menu.js
-│       ├── playing.js      # Demo: player, obstacle, scroll
-│       └── gameover.js
+│       ├── menu.js         # Start + optional register
+│       ├── playing.js      # Play loop: combat, HUD, hazards
+│       └── gameover.js     # Final score, submit, menu / retry
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
@@ -159,8 +178,9 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── validate.js
 │   └── http.js
 ├── scripts/
-│   ├── local-api.mjs       # Local HTTP runner for api/*
-│   └── smoke-api.mjs       # HTTP smoke verification
+│   ├── local-api.mjs       # Local HTTP: api/* + static files
+│   ├── smoke-api.mjs       # HTTP smoke verification
+│   └── smoke-game.mjs      # Client game-module smoke
 ├── data/                   # Local SQLite DB (gitignored)
 ├── vercel.json
 ├── package.json
@@ -187,4 +207,5 @@ Without `LIBSQL_URL`, handlers fall back to a local file path. That is fine for 
 - No bundler or SPA framework is required.
 - Game logic lives under `src/` (engine + scenes).
 - Public media and data live under `public/assets/`.
-- Auth (passwords/OAuth) and full game UI score wiring are out of scope for the current API slice.
+- Auth (passwords/OAuth) is out of scope; the menu stores `{ playerId, nickname }` in `localStorage` (`rtypeweb.player`) after register so game over can `POST /api/score`.
+- Enemy systems can call `player.takeDamage(n)` and `score.add(points)` without importing scenes.
