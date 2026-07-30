@@ -2,6 +2,9 @@
  * Keyboard (and optional touch) input abstraction.
  * Actions: up, down, left, right, fire.
  * Call endFrame() after each update to clear wasPressed edges.
+ *
+ * Keyboard and touch contribute independently and are OR-composited so a
+ * hybrid device does not wipe held keys on touch events (or vice versa).
  */
 
 const ACTION_KEYS = {
@@ -9,7 +12,7 @@ const ACTION_KEYS = {
   down: new Set(['ArrowDown', 'KeyS', 's', 'S']),
   left: new Set(['ArrowLeft', 'KeyA', 'a', 'A']),
   right: new Set(['ArrowRight', 'KeyD', 'd', 'D']),
-  fire: new Set(['Space', ' ']),
+  fire: new Set(['Space', ' ', 'Enter']),
 };
 
 const GAME_KEY_CODES = new Set([
@@ -22,7 +25,23 @@ const GAME_KEY_CODES = new Set([
   'KeyS',
   'KeyD',
   'Space',
+  'Enter',
 ]);
+
+const ACTIONS = ['up', 'down', 'left', 'right', 'fire'];
+
+/**
+ * @returns {Record<string, boolean>}
+ */
+function emptyActions() {
+  return {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    fire: false,
+  };
+}
 
 /**
  * @param {object} [options]
@@ -30,22 +49,12 @@ const GAME_KEY_CODES = new Set([
  * @param {boolean} [options.enableTouch]
  */
 export function createInput({ target = window, enableTouch = true } = {}) {
-  /** @type {Record<string, boolean>} */
-  const down = {
-    up: false,
-    down: false,
-    left: false,
-    right: false,
-    fire: false,
-  };
-  /** @type {Record<string, boolean>} */
-  const pressed = {
-    up: false,
-    down: false,
-    left: false,
-    right: false,
-    fire: false,
-  };
+  /** Keyboard contribution (not overwritten by touch). */
+  const keyDown = emptyActions();
+  /** Touch contribution (rebuilt from active touches only). */
+  const touchDown = emptyActions();
+  /** Edge-triggered presses this frame (either source). */
+  const pressed = emptyActions();
 
   /** @type {Map<number, { x: number, y: number, side: 'left' | 'right' }>} */
   const touches = new Map();
@@ -62,6 +71,13 @@ export function createInput({ target = window, enableTouch = true } = {}) {
   }
 
   /**
+   * @param {string} action
+   */
+  function isActionDown(action) {
+    return !!(keyDown[action] || touchDown[action]);
+  }
+
+  /**
    * @param {KeyboardEvent} e
    * @param {boolean} isDown
    */
@@ -72,10 +88,10 @@ export function createInput({ target = window, enableTouch = true } = {}) {
     const action = actionForKey(e.code) || actionForKey(e.key);
     if (!action) return;
     if (isDown) {
-      if (!down[action]) pressed[action] = true;
-      down[action] = true;
+      if (!isActionDown(action)) pressed[action] = true;
+      keyDown[action] = true;
     } else {
-      down[action] = false;
+      keyDown[action] = false;
     }
   }
 
@@ -86,19 +102,15 @@ export function createInput({ target = window, enableTouch = true } = {}) {
     if (!enableTouch) return;
     e.preventDefault();
 
-    // Rebuild from active touches on the document/viewport.
-    // Left half of viewport = steer (relative to center of left half);
-    // right half = fire.
-    down.up = false;
-    down.down = false;
-    down.left = false;
-    down.right = false;
-    // fire held while any right-half touch is active
-    let fireHeld = false;
+    // Rebuild touch contribution only — keyboard flags stay intact.
+    for (const a of ACTIONS) {
+      touchDown[a] = false;
+    }
 
     const w = window.innerWidth;
     const h = window.innerHeight;
     const halfW = w / 2;
+    let fireHeld = false;
 
     for (const t of e.touches) {
       const x = t.clientX;
@@ -112,10 +124,10 @@ export function createInput({ target = window, enableTouch = true } = {}) {
         const dx = x - cx;
         const dy = y - cy;
         const dead = 24;
-        if (dx < -dead) down.left = true;
-        if (dx > dead) down.right = true;
-        if (dy < -dead) down.up = true;
-        if (dy > dead) down.down = true;
+        if (dx < -dead) touchDown.left = true;
+        if (dx > dead) touchDown.right = true;
+        if (dy < -dead) touchDown.up = true;
+        if (dy > dead) touchDown.down = true;
       }
       touches.set(t.identifier, {
         x,
@@ -130,8 +142,8 @@ export function createInput({ target = window, enableTouch = true } = {}) {
       if (!active.has(id)) touches.delete(id);
     }
 
-    if (fireHeld && !down.fire) pressed.fire = true;
-    down.fire = fireHeld;
+    if (fireHeld && !isActionDown('fire')) pressed.fire = true;
+    touchDown.fire = fireHeld;
   }
 
   /**
@@ -164,7 +176,7 @@ export function createInput({ target = window, enableTouch = true } = {}) {
      * @param {string} action
      */
     isDown(action) {
-      return !!down[action];
+      return isActionDown(action);
     },
     /**
      * @param {string} action
@@ -174,7 +186,7 @@ export function createInput({ target = window, enableTouch = true } = {}) {
     },
     /** Clear edge-triggered presses after update. */
     endFrame() {
-      for (const k of Object.keys(pressed)) {
+      for (const k of ACTIONS) {
         pressed[k] = false;
       }
     },

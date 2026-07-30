@@ -1,6 +1,10 @@
 /**
  * Scene / state machine for menu → playing → gameover hooks.
  * Scenes implement optional enter / exit / update / render.
+ *
+ * Factories are resolved once and cached. Call invalidateScene(name) before
+ * setScene(name) to force a fresh factory instance (e.g. restart). setScene
+ * always re-enters after invalidate even when already on that scene.
  */
 
 /**
@@ -24,6 +28,9 @@ export function createGame({ scenes, initial = 'menu', onSceneChange }) {
   let current = null;
   /** @type {Record<string, Scene>} */
   const resolved = {};
+  /** Names dropped via invalidateScene — next setScene re-resolves even if current. */
+  /** @type {Set<string>} */
+  const pendingReenter = new Set();
 
   /**
    * @param {string} name
@@ -45,7 +52,9 @@ export function createGame({ scenes, initial = 'menu', onSceneChange }) {
      * @param {string} name
      */
     setScene(name) {
-      if (currentName === name && current) return;
+      const forceReenter = pendingReenter.has(name);
+      if (currentName === name && current && !forceReenter) return;
+      pendingReenter.delete(name);
       if (current?.exit) current.exit();
       currentName = name;
       current = resolve(name);
@@ -71,9 +80,14 @@ export function createGame({ scenes, initial = 'menu', onSceneChange }) {
       if (current?.render) current.render(alpha);
     },
 
-    /** Force re-create a scene factory on next enter (optional). */
+    /**
+     * Drop a cached scene so the next setScene re-runs the factory.
+     * If name is the current scene, the next setScene(name) will re-enter.
+     * @param {string} name
+     */
     invalidateScene(name) {
       delete resolved[name];
+      pendingReenter.add(name);
     },
   };
 

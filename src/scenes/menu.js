@@ -30,11 +30,7 @@ export function createMenuScene({
      * @param {number} _dt
      */
     update(_dt) {
-      if (input.wasPressed('fire') || input.isDown('fire')) {
-        // Fire is Space; also allow Enter via raw check is awkward — Space is enough.
-        // Plan: boot into playing for verify; menu still usable.
-      }
-      // Use fire edge or we start immediately if held — prefer wasPressed only.
+      // fire action includes Space and Enter (see input.js).
       if (input.wasPressed('fire')) {
         onStart();
       }
@@ -60,7 +56,7 @@ export function createMenuScene({
 
       ctx.font = '16px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(232, 238, 245, 0.8)';
-      ctx.fillText('Press Space to start', viewWidth / 2, viewHeight / 2 + 16);
+      ctx.fillText('Press Enter or Space to start', viewWidth / 2, viewHeight / 2 + 16);
       ctx.font = '13px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(232, 238, 245, 0.55)';
       ctx.fillText(
