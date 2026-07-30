@@ -1,6 +1,6 @@
 # R-Type Web
 
-Vanilla JavaScript shell for an R-Type-style browser game. Static site at the repo root, deployable on Vercel, with room for public assets and optional serverless API routes.
+Vanilla JavaScript shell for an R-Type-style browser game. Static site at the repo root, deployable on Vercel, with a modular side-scrolling engine under `src/engine/`.
 
 ## Requirements
 
@@ -22,24 +22,39 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Expected result:** page title **R-Type Web**, heading **R-Type Web — shell**, status **Shell ready.** No console errors from the shell.
+**Expected result:** canvas game view boots into **Playing**. The world auto-scrolls right (content moves left on screen — R-Type rightward advance). **WASD / arrows** move the green player rect; colliding with the red obstacle transitions to **game over** (Space retries). Purple enemy rects stream from the right and despawn off-screen. No console errors.
+
+### Scroll convention
+
+Player faces / advances **+X (right)**. Camera `x` increases as the playfield streams past; see the table in `src/engine/camera.js`.
 
 ## Project layout
 
 ```
 .
-├── index.html              # Static entry
+├── index.html              # Static entry + canvas
 ├── src/
-│   └── main.js             # ES module entry (game code goes here later)
+│   ├── main.js             # Boot: canvas, Input, Game, Loop
+│   ├── engine/
+│   │   ├── loop.js         # Fixed-timestep rAF loop
+│   │   ├── input.js        # Keyboard + simple touch
+│   │   ├── camera.js       # World scroll / transforms
+│   │   ├── entity.js       # Entity + EntityList
+│   │   ├── collision.js    # AABB helpers
+│   │   └── game.js         # Scene state machine
+│   └── scenes/
+│       ├── menu.js
+│       ├── playing.js      # Demo: player, obstacle, scroll
+│       └── gameover.js
 ├── public/
 │   └── assets/
-│       ├── sprites/        # Sprite images
-│       ├── audio/          # Sound / music
-│       └── data/           # Level / config data
-├── api/                    # Optional Vercel serverless functions (empty for now)
-├── vercel.json             # Vercel static + clean URLs
+│       ├── sprites/
+│       ├── audio/
+│       └── data/
+├── api/                    # Optional Vercel serverless functions
+├── vercel.json
 ├── package.json
-├── .nvmrc                  # Node 20
+├── .nvmrc
 └── README.md
 ```
 
@@ -71,6 +86,6 @@ vercel --prod   # production
 ## Notes
 
 - No bundler or SPA framework is required.
-- Game logic lives under `src/`.
+- Game logic lives under `src/` (engine + scenes).
 - Public media and data live under `public/assets/`.
 - Future score or other backends can use `api/*.js` (or TypeScript) as Vercel serverless functions.
