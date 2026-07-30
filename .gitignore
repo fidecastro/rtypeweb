@@ -4,3 +4,7 @@ node_modules/
 *.log
 .env
 .env.*
+!.env.example
+data/
+*.db
+*.db-*
