@@ -9,9 +9,16 @@
   },
   "scripts": {
     "start": "serve . -l 3000",
-    "dev": "serve . -l 3000"
+    "dev": "serve . -l 3000",
+    "api": "node scripts/local-api.mjs",
+    "dev:vercel": "vercel dev --listen 3000",
+    "smoke": "node scripts/smoke-api.mjs"
   },
   "devDependencies": {
-    "serve": "^14.2.4"
+    "serve": "^14.2.4",
+    "vercel": "^58.4.4"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.4"
   }
 }
