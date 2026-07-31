@@ -28,6 +28,7 @@ import {
   getPowerupHudState,
   randomPowerupType,
 } from '../game/powerups.js';
+import { getAudio } from '../audio.js';
 
 const DEATH_FREEZE_SEC = 0.45;
 const CLEAR_FREEZE_SEC = 1.6;
@@ -56,6 +57,8 @@ export function createPlayingScene({
   viewHeight,
   runState,
 }) {
+  const audio = getAudio();
+
   const camera = createCamera({
     x: 0,
     y: 0,
@@ -191,6 +194,7 @@ export function createPlayingScene({
     encounterBanner = `BOSS — ${String(name).toUpperCase()}`;
     phaseLabel = phase?.label || phaseLabel;
     if (setStatus) setStatus(`Boss: ${name}`);
+    audio.playSfx('boss_alert');
   }
 
   function handleBossOutro(phase, phaseIndex) {
@@ -277,6 +281,8 @@ export function createPlayingScene({
     deathTimer = DEATH_FREEZE_SEC;
     encounterBanner = '';
     if (setStatus) setStatus('Destroyed…');
+    audio.playSfx('death');
+    audio.stopMusic();
   }
 
   /**
@@ -304,8 +310,11 @@ export function createPlayingScene({
         const hasHp = typeof e.hp === 'number' && Number.isFinite(e.hp);
         if (hasHp) {
           e.hp = Math.max(0, e.hp - PROJECTILE_DAMAGE);
-          if (e.hp > 0 && e.baseColor) {
-            e.color = e.openColor || '#fef08a';
+          if (e.hp > 0) {
+            audio.playSfx('hit');
+            if (e.baseColor) {
+              e.color = e.openColor || '#fef08a';
+            }
           }
           if (e.hp <= 0) {
             onEntityKilled(e);
@@ -315,6 +324,7 @@ export function createPlayingScene({
           const dropY = e.y;
           e.alive = false;
           score.add(SCORE_ENEMY_KILL);
+          audio.playSfx('explosion');
           if (Math.random() < POWERUP_DROP_CHANCE) {
             spawnPowerupAt(randomPowerupType(), dropX, dropY);
           }
@@ -338,6 +348,7 @@ export function createPlayingScene({
             : bossScoreFor(e.kind);
         score.add(pts);
       }
+      audio.playSfx('explosion');
       if (typeof e.beginDeath === 'function') {
         e.beginDeath();
       } else {
@@ -353,6 +364,7 @@ export function createPlayingScene({
     const dropY = e.y;
     e.alive = false;
     score.add(SCORE_ENEMY_KILL);
+    audio.playSfx('explosion');
     if (Math.random() < POWERUP_DROP_CHANCE) {
       spawnPowerupAt(randomPowerupType(), dropX, dropY);
     }
@@ -389,9 +401,12 @@ export function createPlayingScene({
       if (!aabbOverlap(player, p)) continue;
       const result = applyPowerup(player, p.powerupType);
       p.alive = false;
-      if (result.applied && result.label) {
-        collectMessage = `GOT ${result.label.toUpperCase()}`;
-        collectToastTimer = COLLECT_TOAST_SEC;
+      if (result.applied) {
+        audio.playSfx('powerup');
+        if (result.label) {
+          collectMessage = `GOT ${result.label.toUpperCase()}`;
+          collectToastTimer = COLLECT_TOAST_SEC;
+        }
       }
       break;
     }
@@ -642,6 +657,8 @@ export function createPlayingScene({
       };
       window.addEventListener('keydown', onDebugKey);
 
+      // Stage loop after unlock; queues if still locked.
+      audio.playMusic('stage');
       if (setStatus) setStatus('Playing');
     },
 
@@ -651,6 +668,7 @@ export function createPlayingScene({
         window.removeEventListener('keydown', onDebugKey);
         onDebugKey = null;
       }
+      audio.stopMusic();
       entities.clear();
       player = null;
       director = null;
@@ -694,7 +712,8 @@ export function createPlayingScene({
 
       if (player) {
         player.updateTimers(dt);
-        player.tryFire(entities);
+        const fired = player.tryFire(entities);
+        if (fired) audio.playSfx('shot');
       }
 
       if (director) {

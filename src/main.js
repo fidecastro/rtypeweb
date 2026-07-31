@@ -1,6 +1,7 @@
 /**
  * Title screen / main menu: leaderboard, register, scores, play (engine mount).
  * Engine wiring: runState, combat playing scene, game-over score submit.
+ * Audio unlocks on first user gesture; mute persists via localStorage.
  */
 import { fetchLeaderboard, registerPlayer } from './api.js';
 import { loadPlayer, savePlayer } from './player.js';
@@ -10,6 +11,9 @@ import { createGame } from './engine/game.js';
 import { createPlayingScene } from './scenes/playing.js';
 import { createMenuScene } from './scenes/menu.js';
 import { createGameOverScene } from './scenes/gameover.js';
+import { getAudio } from './audio.js';
+
+const audio = getAudio();
 
 const VIEWS = ['home', 'register', 'scores', 'play'];
 const VIEW_WIDTH = 960;
@@ -217,9 +221,17 @@ function showView(view) {
   });
 
   if (view === 'play') {
+    // Stage music is started by the playing scene after unlock.
     startPlay();
   } else {
     stopPlay();
+    // Shell views: restore menu music when unlocked and not muted.
+    if (audio.isUnlocked() && !audio.isMuted()) {
+      audio.playMusic('menu');
+    } else if (!audio.isUnlocked()) {
+      // Queue intent so unlock starts the right track.
+      audio.playMusic('menu');
+    }
   }
 
   if (view === 'home') {
@@ -328,10 +340,69 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+function updateMuteButton() {
+  const btn = $('mute-toggle');
+  if (!btn) return;
+  const muted = audio.isMuted();
+  btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+  btn.textContent = muted ? 'Sound: Off' : 'Sound: On';
+}
+
+/**
+ * Unlock audio on the first user gesture (autoplay policy).
+ * @returns {Promise<void>}
+ */
+async function ensureAudioUnlocked() {
+  await audio.unlockFromGesture();
+  // If still on a shell view after unlock, ensure menu music is running.
+  if (currentView !== 'play' && !audio.isMuted()) {
+    audio.playMusic('menu');
+  }
+}
+
+function wireAudioUnlock() {
+  let armed = true;
+  const onGesture = () => {
+    if (!armed) return;
+    armed = false;
+    window.removeEventListener('pointerdown', onGesture, true);
+    window.removeEventListener('keydown', onGesture, true);
+    // Resume AudioContext on the same user-gesture stack.
+    void ensureAudioUnlocked();
+  };
+  window.addEventListener('pointerdown', onGesture, true);
+  window.addEventListener('keydown', onGesture, true);
+}
+
+function wireMuteToggle() {
+  const btn = $('mute-toggle');
+  if (!btn) return;
+  updateMuteButton();
+  btn.addEventListener('click', async () => {
+    await ensureAudioUnlocked();
+    audio.setMuted(!audio.isMuted());
+    updateMuteButton();
+    // Resume correct track after unmute.
+    if (!audio.isMuted()) {
+      if (currentView === 'play') {
+        audio.playMusic('stage');
+      } else {
+        audio.playMusic('menu');
+      }
+    }
+  });
+}
+
 function wireNav() {
   document.querySelectorAll('[data-nav]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
+      await ensureAudioUnlocked();
       const view = btn.getAttribute('data-nav') || 'home';
+      if (view === 'play') {
+        audio.playSfx('ui_confirm');
+      } else {
+        audio.playSfx('ui_select');
+      }
       showView(view);
     });
   });
@@ -393,6 +464,8 @@ function wireRegister() {
           ? `Registered as ${data.nickname}. Profile saved.`
           : `Welcome back, ${data.nickname}. Profile loaded.`;
       setPlayerBadge();
+      await ensureAudioUnlocked();
+      audio.playSfx('ui_confirm');
     } catch (err) {
       status.classList.add('is-error');
       status.textContent =
@@ -415,9 +488,13 @@ function wireScoresRefresh() {
 
 function boot() {
   setPlayerBadge();
+  wireAudioUnlock();
+  wireMuteToggle();
   wireNav();
   wireRegister();
   wireScoresRefresh();
+  // Queue menu music intent (starts after first gesture unlock).
+  audio.playMusic('menu');
   showView(viewFromHash());
   console.log('[rtypeweb] menu shell booted');
 }

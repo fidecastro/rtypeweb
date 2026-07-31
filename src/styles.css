@@ -73,6 +73,39 @@ body {
   display: none;
 }
 
+.header-controls {
+  margin-top: 0.65rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.mute-btn {
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  color: var(--muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  transition: border-color 0.12s, color 0.12s, box-shadow 0.12s;
+}
+
+.mute-btn:hover,
+.mute-btn:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent-dim);
+}
+
+.mute-btn[aria-pressed="true"] {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 .main-nav {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

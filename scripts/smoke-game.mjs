@@ -57,6 +57,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { aabbOverlap } from "../src/engine/collision.js";
+import {
+  createAudio,
+  getAudio,
+  MUTE_STORAGE_KEY,
+  __setAudioForTests,
+} from "../src/audio.js";
 
 let failed = 0;
 
@@ -787,6 +793,48 @@ console.log("powerups");
         player.hasSurgeActive() === true,
     );
   }
+}
+
+console.log("audio manager (graceful degrade in Node)");
+{
+  __setAudioForTests(null);
+  const a = createAudio();
+  assert("API methods present", typeof a.playSfx === "function" && typeof a.playMusic === "function");
+  assert("default unmuted or storage", typeof a.isMuted() === "boolean");
+  // No AudioContext in Node — all calls must no-op without throw.
+  let threw = false;
+  try {
+    a.playSfx("shot");
+    a.playSfx("explosion");
+    a.playSfx("hit");
+    a.playSfx("death");
+    a.playSfx("powerup");
+    a.playSfx("ui_select");
+    a.playSfx("ui_confirm");
+    a.playSfx("boss_alert");
+    a.playMusic("menu");
+    a.playMusic("stage");
+    a.stopMusic();
+    a.setMuted(true);
+    a.setMuted(false);
+  } catch {
+    threw = true;
+  }
+  assert("play/stop no-throw without context", threw === false);
+  assert("mute storage key", MUTE_STORAGE_KEY === "rtypeweb.audio.muted");
+
+  // In-memory mute flip (localStorage may be absent in Node).
+  a.setMuted(true);
+  assert("setMuted true", a.isMuted() === true);
+  a.setMuted(false);
+  assert("setMuted false", a.isMuted() === false);
+
+  // Singleton helper returns a usable instance.
+  __setAudioForTests(null);
+  const shared = getAudio();
+  assert("getAudio singleton", shared === getAudio());
+  shared.playSfx("shot");
+  __setAudioForTests(null);
 }
 
 if (failed > 0) {
