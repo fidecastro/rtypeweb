@@ -5,13 +5,14 @@
   "description": "R-Type-style web game — menu shell, engine, score API (Vercel-ready)",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "24.x"
   },
   "scripts": {
     "start": "serve . -l 3000",
     "dev": "serve . -l 3000",
     "api": "node scripts/local-api.mjs",
     "dev:vercel": "vercel dev --listen 3000",
+    "build": "node scripts/prepare-vercel-static.mjs",
     "smoke": "node scripts/smoke-api.mjs",
     "smoke:game": "node scripts/smoke-game.mjs"
   },

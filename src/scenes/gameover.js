@@ -1,10 +1,15 @@
 /**
  * Game-over: final score, optional POST /api/score when registered,
  * Space/Enter retry, Esc/M → shell title menu.
+ *
+ * Registered players: submit is awaited before returning to the title menu so
+ * home's leaderboard refetch sees the new score. Network failures surface a
+ * clear status (parity with register / leaderboard). Unregistered play is
+ * allowed — score is not submitted.
  */
 
-import { submitScore } from '../api.js';
-import { loadPlayer } from '../player.js';
+import { submitScore as defaultSubmitScore } from '../api.js';
+import { loadPlayer as defaultLoadPlayer } from '../player.js';
 
 /**
  * @param {object} deps
@@ -18,6 +23,8 @@ import { loadPlayer } from '../player.js';
  * @param {(text: string) => void} [deps.setStatus]
  * @param {number} deps.viewWidth
  * @param {number} deps.viewHeight
+ * @param {typeof defaultSubmitScore} [deps.submitScore] inject for tests
+ * @param {typeof defaultLoadPlayer} [deps.loadPlayer] inject for tests
  */
 export function createGameOverScene({
   canvas,
@@ -30,16 +37,46 @@ export function createGameOverScene({
   setStatus,
   viewWidth,
   viewHeight,
+  submitScore = defaultSubmitScore,
+  loadPlayer = defaultLoadPlayer,
 }) {
   /** @type {string} */
   let submitStatus = '';
   let submittedThisEnter = false;
+  /** In-flight score POST (or null when none / already settled). */
+  /** @type {Promise<void> | null} */
+  let submitInflight = null;
+  let leavingToMenu = false;
   /** @type {((e: KeyboardEvent) => void) | null} */
   let onKey = null;
+
+  /**
+   * Return to shell title only after any in-flight submit settles so home
+   * refetch can include the new score.
+   */
+  function leaveToMenu() {
+    if (leavingToMenu) return;
+    leavingToMenu = true;
+
+    const go = () => {
+      if (typeof onMenu === 'function') onMenu();
+    };
+
+    if (submitInflight) {
+      if (submitStatus === 'Submitting score…') {
+        submitStatus = 'Submitting score… (returning when saved)';
+      }
+      submitInflight.then(go, go);
+      return;
+    }
+    go();
+  }
 
   return {
     enter() {
       submittedThisEnter = false;
+      submitInflight = null;
+      leavingToMenu = false;
       const finalScore = typeof getLastScore === 'function' ? getLastScore() : 0;
       const cleared = typeof getCleared === 'function' ? !!getCleared() : false;
       const player = loadPlayer();
@@ -56,24 +93,36 @@ export function createGameOverScene({
         if (!submittedThisEnter) {
           submittedThisEnter = true;
           // API contract: playerId; storage shape: player.id (DEV-148).
-          submitScore({ playerId: player.id, value: finalScore }).then((result) => {
-            if (result.ok) {
-              submitStatus = `Score saved as ${player.nickname}`;
-            } else {
-              const err =
-                (result.data && result.data.error) ||
-                result.status ||
-                'unknown error';
-              submitStatus = `Submit failed: ${err}`;
-            }
-          });
+          submitInflight = Promise.resolve()
+            .then(() => submitScore({ playerId: player.id, value: finalScore }))
+            .then((result) => {
+              if (result.ok) {
+                submitStatus = `Score saved as ${player.nickname}`;
+              } else {
+                const err =
+                  (result.data && result.data.error) ||
+                  result.status ||
+                  'unknown error';
+                submitStatus = `Submit failed: ${err}`;
+              }
+            })
+            .catch((err) => {
+              const msg =
+                err instanceof Error
+                  ? err.message
+                  : 'Network error — could not reach score API.';
+              submitStatus = `Submit failed: ${msg}`;
+            })
+            .finally(() => {
+              submitInflight = null;
+            });
         }
       }
 
       onKey = (e) => {
         if (e.code === 'Escape' || e.code === 'KeyM' || e.key === 'm' || e.key === 'M') {
           e.preventDefault();
-          if (typeof onMenu === 'function') onMenu();
+          leaveToMenu();
         }
       };
       window.addEventListener('keydown', onKey);
@@ -136,6 +185,13 @@ export function createGameOverScene({
       ctx.fillText('Esc / M — title menu', viewWidth / 2, viewHeight / 2 + 90);
 
       ctx.restore();
+    },
+
+    /** @internal exposed for smoke tests */
+    _test: {
+      getSubmitStatus: () => submitStatus,
+      leaveToMenu,
+      getSubmitInflight: () => submitInflight,
     },
   };
 }
