@@ -8,7 +8,10 @@
  *    Weapon modes are not timed; they last until replaced or the run ends.
  * 2. Aegis (`aegis`) — independent of weapon mode. Each pickup adds +1 charge,
  *    max AEGIS_MAX_CHARGES (2). Extra pickups at cap do not raise charges.
- *    Charges persist until consumed by a hit or death.
+ *    Charges persist until consumed by a hit or death. On absorb, the charge
+ *    is spent and the player gains the same brief invulnerability window as a
+ *    normal hit (PLAYER_INVULN_SEC) so continuous hazard overlap = one charge,
+ *    not one charge per frame.
  * 3. Surge (`surge`) — independent of weapon and aegis. Collecting while
  *    active refreshes duration to full SURGE_DURATION_SEC; multipliers do
  *    not stack.

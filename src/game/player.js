@@ -99,7 +99,9 @@ export function createPlayer({
     /**
      * Apply damage, or absorb with Aegis.
      * Contract: returns true only when HP was reduced (or death applied).
-     * Aegis absorb: consumes one charge, no HP loss, no invuln window, returns false.
+     * Aegis absorb: consumes one charge, no HP loss, grants the same
+     * PLAYER_INVULN_SEC hit window as a normal hit so continuous hazard
+     * overlap burns at most one charge per contact (not per frame), returns false.
      * Empty aegis + invuln: still blocked as before.
      * @param {number} amount
      * @returns {boolean} true if damage was applied
@@ -110,10 +112,11 @@ export function createPlayer({
       if (!Number.isFinite(n) || n <= 0) return false;
       if (this._time < this.invulnerableUntil) return false;
 
-      // Aegis: negate hit without granting invuln (see powerups.js rules).
+      // Aegis: negate hit and grant hit-window invuln so multi-frame overlap
+      // does not burn every charge in a few frames (see powerups.js rules).
       if (this.aegisCharges > 0) {
         this.aegisCharges -= 1;
-        // Brief visual flash only — not a real invuln window.
+        this.invulnerableUntil = this._time + PLAYER_INVULN_SEC;
         this.color = '#c4b5fd';
         return false;
       }
@@ -149,7 +152,7 @@ export function createPlayer({
         this.fireCooldown = Math.max(0, this.fireCooldown - dt);
       }
       // Restore ship color when invuln ends (unless dead).
-      // Aegis flash is non-invuln; restore when not in invuln and color was flash.
+      // Covers both normal-hit flash and Aegis absorb flash.
       if (!this.isDead && this._time >= this.invulnerableUntil) {
         this.color = this.hasSurgeActive() ? '#6ee7b7' : '#4ade80';
       }
