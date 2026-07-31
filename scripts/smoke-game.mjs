@@ -64,6 +64,17 @@ import {
   __setAudioForTests,
 } from "../src/audio.js";
 import { createGameOverScene } from "../src/scenes/gameover.js";
+import {
+  DEFAULT_PORTAL_BASE,
+  HANDOFF_QUERY_KEYS,
+  PORTAL_BASE_STORAGE_KEY,
+  applyPortalHandoff,
+  readHandoffParams,
+  resolvePortalBase,
+  sanitizePortalBase,
+  stripHandoffParams,
+  verifyPortalToken,
+} from "../src/portalHandoff.js";
 
 let failed = 0;
 
@@ -1199,6 +1210,260 @@ await (async () => {
 
   if (origAdd) win.addEventListener = origAdd;
   if (origRemove) win.removeEventListener = origRemove;
+})();
+
+console.log("portal handoff helpers");
+await (async () => {
+  // Parse: no token → null (standalone visit).
+  assert("no token → null", readHandoffParams("") === null);
+  assert("empty search → null", readHandoffParams("?") === null);
+  assert(
+    "unrelated params only → null",
+    readHandoffParams("?apiBase=http://localhost:3000") === null,
+  );
+
+  const parsed = readHandoffParams(
+    "?portalToken=tok123&portalPlayerId=id-1&portalNickname=Ace&portalEmail=a%40b.co&portalBase=http://localhost:4000&apiBase=http://localhost:3000",
+  );
+  assert("token present", !!parsed && parsed.token === "tok123");
+  assert("playerId from query", parsed.playerId === "id-1");
+  assert("nickname from query", parsed.nickname === "Ace");
+  assert("email decoded", parsed.email === "a@b.co");
+  assert("portalBase from query", parsed.portalBase === "http://localhost:4000");
+
+  // sanitizePortalBase: http(s) only; non-loopback HTTPS allowed.
+  assert("sanitize https prod", sanitizePortalBase("https://webgamesportal.vercel.app/") === "https://webgamesportal.vercel.app");
+  assert("sanitize localhost", sanitizePortalBase("http://localhost:3000") === "http://localhost:3000");
+  assert("sanitize rejects ftp", sanitizePortalBase("ftp://evil") === null);
+  assert("sanitize rejects empty", sanitizePortalBase("  ") === null);
+  assert("sanitize rejects garbage", sanitizePortalBase("not a url") === null);
+
+  // resolvePortalBase: query → storage → default
+  {
+    /** @type {Record<string, string>} */
+    const store = {};
+    const storage = {
+      getItem(k) {
+        return store[k] ?? null;
+      },
+      setItem(k, v) {
+        store[k] = String(v);
+      },
+      removeItem(k) {
+        delete store[k];
+      },
+    };
+    assert(
+      "default portal base",
+      resolvePortalBase({ search: "", storage }) === DEFAULT_PORTAL_BASE,
+    );
+    assert(
+      "query portalBase wins + persists",
+      resolvePortalBase({
+        search: "?portalBase=http://127.0.0.1:3000",
+        storage,
+      }) === "http://127.0.0.1:3000",
+    );
+    assert(
+      "stored after query",
+      store[PORTAL_BASE_STORAGE_KEY] === "http://127.0.0.1:3000",
+    );
+    assert(
+      "storage used when no query",
+      resolvePortalBase({ search: "", storage }) === "http://127.0.0.1:3000",
+    );
+  }
+
+  // Strip preserves hash + non-handoff params.
+  {
+    const cleaned = stripHandoffParams(
+      "/?portalToken=secret&apiBase=http://localhost:3000&portalPlayerId=x#/play",
+    );
+    const cleanedUrl = new URL(cleaned, "http://x");
+    assert(
+      "strip removes portalToken",
+      !cleaned.includes("portalToken") && !cleaned.includes("secret"),
+    );
+    assert(
+      "strip keeps apiBase",
+      cleanedUrl.searchParams.get("apiBase") === "http://localhost:3000",
+    );
+    assert("strip keeps hash", cleaned.includes("#/play"));
+    for (const key of HANDOFF_QUERY_KEYS) {
+      assert(
+        `strip removes ${key}`,
+        !cleanedUrl.searchParams.has(key),
+      );
+    }
+  }
+
+  // applyPortalHandoff: skipped without token
+  {
+    const result = await applyPortalHandoff({
+      search: "?apiBase=http://localhost:3000",
+      fetchImpl: async () => {
+        throw new Error("fetch should not run");
+      },
+      savePlayerFn: () => {
+        throw new Error("save should not run");
+      },
+    });
+    assert("no token → skipped", result === "skipped");
+  }
+
+  // Applied path: mock verify → savePlayer shape
+  {
+    /** @type {object | null} */
+    let saved = null;
+    /** @type {string | null} */
+    let fetchUrl = null;
+    const loc = {
+      pathname: "/",
+      search:
+        "?portalToken=good-token&portalPlayerId=forged&portalNickname=Forged&portalEmail=forged@x.com",
+      hash: "#/",
+    };
+    let replaced = "";
+    const hist = {
+      replaceState(_s, _t, url) {
+        replaced = String(url);
+      },
+    };
+    const result = await applyPortalHandoff({
+      search: loc.search,
+      storage: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+      },
+      fetchImpl: async (url) => {
+        fetchUrl = String(url);
+        return {
+          ok: true,
+          status: 200,
+          async text() {
+            return JSON.stringify({
+              valid: true,
+              player: {
+                id: "verified-id",
+                nickname: "VerifiedAce",
+                email: "ace@portal.test",
+              },
+              exp: 9999999999,
+              iat: 1,
+            });
+          },
+        };
+      },
+      savePlayerFn: (p) => {
+        saved = p;
+        return p;
+      },
+      location: /** @type {any} */ (loc),
+      history: /** @type {any} */ (hist),
+    });
+    assert("applied result", result === "applied");
+    assert(
+      "saved verified id not query id",
+      !!saved &&
+        saved.id === "verified-id" &&
+        saved.nickname === "VerifiedAce" &&
+        saved.email === "ace@portal.test",
+    );
+    assert(
+      "verify URL uses portal + token",
+      !!fetchUrl &&
+        fetchUrl.startsWith(`${DEFAULT_PORTAL_BASE}/api/auth/verify?token=`) &&
+        fetchUrl.includes(encodeURIComponent("good-token")),
+    );
+    assert(
+      "URL stripped after apply",
+      replaced !== "" && !replaced.includes("portalToken"),
+    );
+  }
+
+  // Failed path: 401 — do not save; still strip URL
+  {
+    let saveCalls = 0;
+    let replaced = "";
+    const loc = {
+      pathname: "/",
+      search: "?portalToken=bad&portalPlayerId=forged-id&portalNickname=Hacker",
+      hash: "",
+    };
+    const result = await applyPortalHandoff({
+      search: loc.search,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 401,
+        async text() {
+          return JSON.stringify({
+            error: "Invalid token",
+            code: "INVALID_TOKEN",
+          });
+        },
+      }),
+      savePlayerFn: () => {
+        saveCalls += 1;
+        return {};
+      },
+      location: /** @type {any} */ (loc),
+      history: {
+        replaceState(_s, _t, url) {
+          replaced = String(url);
+        },
+      },
+    });
+    assert("failed result", result === "failed");
+    assert("failed does not save", saveCalls === 0);
+    assert(
+      "failed still strips token",
+      replaced !== "" && !replaced.includes("portalToken"),
+    );
+  }
+
+  // Network error → failed
+  {
+    const result = await applyPortalHandoff({
+      search: "?portalToken=x",
+      fetchImpl: async () => {
+        throw new Error("ECONNREFUSED");
+      },
+      savePlayerFn: () => {
+        throw new Error("should not save");
+      },
+      history: { replaceState() {} },
+      location: { pathname: "/", search: "?portalToken=x", hash: "" },
+    });
+    assert("network → failed", result === "failed");
+  }
+
+  // verifyPortalToken unit shape
+  {
+    const ok = await verifyPortalToken("t", "https://portal.example", async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          valid: true,
+          player: { id: "i", nickname: "n", email: "e@e.com" },
+        });
+      },
+    }));
+    assert("verify ok shape", ok.ok === true && ok.player.id === "i");
+
+    const bad = await verifyPortalToken("t", "https://portal.example", async () => ({
+      ok: false,
+      status: 401,
+      async text() {
+        return JSON.stringify({ error: "gone", code: "TOKEN_EXPIRED" });
+      },
+    }));
+    assert(
+      "verify fail code",
+      bad.ok === false && bad.code === "TOKEN_EXPIRED",
+    );
+  }
 })();
 
 if (failed > 0) {
