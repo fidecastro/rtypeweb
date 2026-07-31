@@ -117,3 +117,18 @@ export function registerPlayer(body) {
     body: JSON.stringify(body),
   });
 }
+
+/**
+ * POST /api/score — body uses API field playerId (stored identity is player.id).
+ * @param {{ playerId: string, value: number }} body
+ * @returns {Promise<{ ok: boolean, status: number, data: any }>}
+ */
+export function submitScore(body) {
+  return apiFetch('/api/score', {
+    method: 'POST',
+    body: JSON.stringify({
+      playerId: body.playerId,
+      value: body.value,
+    }),
+  });
+}

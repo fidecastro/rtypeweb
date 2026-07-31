@@ -78,10 +78,31 @@ export function createInput({ target = window, enableTouch = true } = {}) {
   }
 
   /**
+   * Allow typing / form submit when focus is in a text field or form control.
+   * @param {EventTarget | null} t
+   */
+  function isFormField(t) {
+    if (!t || !(t instanceof Element)) return false;
+    if (
+      t instanceof HTMLInputElement ||
+      t instanceof HTMLTextAreaElement ||
+      t instanceof HTMLSelectElement ||
+      t instanceof HTMLButtonElement
+    ) {
+      return true;
+    }
+    return !!t.closest?.('form, [contenteditable="true"]');
+  }
+
+  /**
    * @param {KeyboardEvent} e
    * @param {boolean} isDown
    */
   function onKey(e, isDown) {
+    // Do not steal keys from register form / inputs (Enter submit, Space in fields).
+    if (isFormField(e.target) || isFormField(document.activeElement)) {
+      return;
+    }
     if (GAME_KEY_CODES.has(e.code) || actionForKey(e.key)) {
       e.preventDefault();
     }

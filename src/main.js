@@ -1,5 +1,6 @@
 /**
  * Title screen / main menu: leaderboard, register, scores, play (engine mount).
+ * Engine wiring: runState, combat playing scene, game-over score submit.
  */
 import { fetchLeaderboard, registerPlayer } from './api.js';
 import { loadPlayer, savePlayer } from './player.js';
@@ -13,6 +14,11 @@ import { createGameOverScene } from './scenes/gameover.js';
 const VIEWS = ['home', 'register', 'scores', 'play'];
 const VIEW_WIDTH = 960;
 const VIEW_HEIGHT = 540;
+
+/** Shared across playing → gameover for last-run score. */
+const runState = {
+  lastScore: 0,
+};
 
 /** @type {string} */
 let currentView = 'home';
@@ -46,8 +52,8 @@ function setPlayerBadge() {
   const playHint = $('play-player-hint');
   if (playHint) {
     playHint.textContent = player
-      ? `Registered pilot: ${player.nickname} — scores will use this profile.`
-      : 'No profile yet — register so a later game-over can attribute your score.';
+      ? `Registered pilot: ${player.nickname} — game-over scores submit for this profile.`
+      : 'No profile yet — register so game over can attribute and submit your score.';
   }
 }
 
@@ -93,7 +99,21 @@ function ensureEngine() {
     game?.setScene('playing');
   }
 
-  function goGameOver() {
+  /**
+   * Leave the play view for the shell title screen (menu path).
+   */
+  function goShellMenu() {
+    showView('home');
+  }
+
+  /**
+   * @param {{ score?: number }} [payload]
+   */
+  function goGameOver(payload) {
+    if (payload && typeof payload.score === 'number') {
+      runState.lastScore = payload.score;
+    }
+    game?.invalidateScene('gameover');
     game?.setScene('gameover');
   }
 
@@ -120,12 +140,15 @@ function ensureEngine() {
       playing: () =>
         createPlayingScene({
           ...sceneDeps,
+          runState,
           onGameOver: goGameOver,
         }),
       gameover: () =>
         createGameOverScene({
           ...sceneDeps,
+          getLastScore: () => runState.lastScore,
           onRestart: goPlaying,
+          onMenu: goShellMenu,
         }),
     },
   });
@@ -146,10 +169,13 @@ function ensureEngine() {
 
 function startPlay() {
   if (!ensureEngine() || !engine) return;
+  // Fresh run whenever the Play view is entered (incl. return from title).
+  engine.game.invalidateScene('playing');
+  engine.game.setScene('playing');
   if (!engine.loop.isRunning()) {
     engine.loop.start();
   }
-  setStatus(engine.game.getScene() === 'playing' ? 'Playing' : engine.game.getScene() || 'Play');
+  setStatus('Playing');
   setPlayerBadge();
 }
 

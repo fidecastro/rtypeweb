@@ -1,26 +1,27 @@
 /**
- * Playing demo scene: auto-scrolling world, placeholder player, test obstacle,
- * optional streaming enemy, collision → game-over hook.
+ * Playing scene: auto-scrolling world, player ship with weapons/HP,
+ * hazards, score, HUD; death → game-over with score payload.
  */
 
 import { createCamera } from '../engine/camera.js';
 import { createEntity, createEntityList } from '../engine/entity.js';
 import { aabbOverlap } from '../engine/collision.js';
+import { createPlayer, SCORE_ENEMY_KILL } from '../game/player.js';
+import { createRunScore } from '../game/score.js';
 
-const PLAYER_SPEED = 220;
-const PLAYER_W = 36;
-const PLAYER_H = 24;
 const ENEMY_SPAWN_INTERVAL = 1.6;
+const DEATH_FREEZE_SEC = 0.45;
 
 /**
  * @param {object} deps
  * @param {HTMLCanvasElement} deps.canvas
  * @param {CanvasRenderingContext2D} deps.ctx
  * @param {ReturnType<import('../engine/input.js').createInput>} deps.input
- * @param {() => void} deps.onGameOver
+ * @param {(payload: { score: number }) => void} deps.onGameOver
  * @param {(text: string) => void} [deps.setStatus]
  * @param {number} deps.viewWidth
  * @param {number} deps.viewHeight
+ * @param {{ lastScore: number }} [deps.runState]
  */
 export function createPlayingScene({
   canvas,
@@ -30,6 +31,7 @@ export function createPlayingScene({
   setStatus,
   viewWidth,
   viewHeight,
+  runState,
 }) {
   const camera = createCamera({
     x: 0,
@@ -40,53 +42,27 @@ export function createPlayingScene({
   });
 
   const entities = createEntityList();
-  /** @type {object | null} */
+  const score = createRunScore();
+  /** @type {ReturnType<typeof createPlayer> | null} */
   let player = null;
   /** @type {object | null} */
   let obstacle = null;
   let spawnTimer = 0;
-  let collided = false;
   let frozen = false;
   let flashT = 0;
+  let deathTimer = 0;
+  let pendingGameOver = false;
+
+  // Debug keys (dev verification when enemies not yet awarding score).
+  /** @type {((e: KeyboardEvent) => void) | null} */
+  let onDebugKey = null;
 
   function spawnPlayer() {
-    player = createEntity({
-      type: 'player',
-      tags: ['player'],
-      x: camera.x + viewWidth * 0.22,
-      y: viewHeight * 0.5 - PLAYER_H / 2,
-      w: PLAYER_W,
-      h: PLAYER_H,
-      color: '#4ade80',
-      despawnWhenOffscreen: false,
-      customUpdate(dt) {
-        let mx = 0;
-        let my = 0;
-        if (input.isDown('left')) mx -= 1;
-        if (input.isDown('right')) mx += 1;
-        if (input.isDown('up')) my -= 1;
-        if (input.isDown('down')) my += 1;
-        if (mx !== 0 && my !== 0) {
-          const inv = 1 / Math.SQRT2;
-          mx *= inv;
-          my *= inv;
-        }
-        this.vx = mx * PLAYER_SPEED;
-        this.vy = my * PLAYER_SPEED;
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
-
-        // Clamp to current camera view band (classic shmup free-flight).
-        const pad = 4;
-        const minX = camera.x + pad;
-        const maxX = camera.x + camera.width - this.w - pad;
-        const minY = camera.y + pad;
-        const maxY = camera.y + camera.height - this.h - pad;
-        if (this.x < minX) this.x = minX;
-        if (this.x > maxX) this.x = maxX;
-        if (this.y < minY) this.y = minY;
-        if (this.y > maxY) this.y = maxY;
-      },
+    player = createPlayer({
+      camera,
+      input,
+      viewWidth,
+      viewHeight,
     });
     entities.add(player);
   }
@@ -123,6 +99,63 @@ export function createPlayingScene({
     );
   }
 
+  function finishRun() {
+    const finalScore = score.get();
+    if (runState) runState.lastScore = finalScore;
+    if (setStatus) setStatus(`Game over — score ${finalScore}`);
+    onGameOver({ score: finalScore });
+  }
+
+  function handlePlayerDeath() {
+    if (pendingGameOver) return;
+    pendingGameOver = true;
+    frozen = true;
+    flashT = 0;
+    deathTimer = DEATH_FREEZE_SEC;
+    if (setStatus) setStatus('Destroyed…');
+  }
+
+  function resolveProjectileHits() {
+    const projectiles = entities.queryByTag('playerProjectile');
+    if (projectiles.length === 0) return;
+
+    for (const proj of projectiles) {
+      if (!proj.alive) continue;
+      for (const e of entities.all()) {
+        if (!e.alive || e === proj) continue;
+        // Killable targets: streaming enemies only (obstacle is solid hazard).
+        if (!e.tags?.has('enemy')) continue;
+        if (aabbOverlap(proj, e)) {
+          e.alive = false;
+          proj.alive = false;
+          score.add(SCORE_ENEMY_KILL);
+          break;
+        }
+      }
+    }
+  }
+
+  function resolveHazardDamage() {
+    if (!player?.alive || player.isDead) return;
+    for (const e of entities.all()) {
+      if (!e.alive || e === player) continue;
+      if (!e.tags?.has('hazard')) continue;
+      if (aabbOverlap(player, e)) {
+        const applied = player.takeDamage(1);
+        if (applied) {
+          e.hit = true;
+          if (e.type === 'obstacle') {
+            e.color = '#fbbf24';
+          }
+          if (player.isDead || player.hp <= 0) {
+            handlePlayerDeath();
+          }
+        }
+        break;
+      }
+    }
+  }
+
   function drawGrid() {
     const step = 64;
     const startX = Math.floor(camera.x / step) * step;
@@ -142,17 +175,47 @@ export function createPlayingScene({
     ctx.stroke();
   }
 
-  function drawHud() {
-    ctx.fillStyle = 'rgba(232, 238, 245, 0.85)';
-    ctx.font = '12px system-ui, sans-serif';
+  function drawHealthBar(hp, maxHp) {
+    const x = 10;
+    const y = 12;
+    const barW = 120;
+    const barH = 12;
+    const ratio = maxHp > 0 ? Math.max(0, hp / maxHp) : 0;
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+    ctx.fillRect(x - 2, y - 2, barW + 4, barH + 4);
+    ctx.strokeStyle = 'rgba(232, 238, 245, 0.45)';
+    ctx.strokeRect(x - 2, y - 2, barW + 4, barH + 4);
+
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(x, y, barW, barH);
+    ctx.fillStyle = ratio > 0.35 ? '#4ade80' : '#f87171';
+    ctx.fillRect(x, y, barW * ratio, barH);
+
+    ctx.fillStyle = 'rgba(232, 238, 245, 0.9)';
+    ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`camera.x ${camera.x.toFixed(0)}`, 10, 18);
-    ctx.fillText(`entities ${entities.length}`, 10, 34);
-    if (collided) {
+    ctx.fillText(`HP ${hp}/${maxHp}`, x + barW + 8, y + 10);
+  }
+
+  function drawHud() {
+    const hp = player?.hp ?? 0;
+    const maxHp = player?.maxHp ?? 0;
+    drawHealthBar(hp, maxHp);
+
+    ctx.fillStyle = 'rgba(232, 238, 245, 0.9)';
+    ctx.font = '14px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Score ${score.get()}`, viewWidth - 12, 22);
+
+    ctx.textAlign = 'left';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(232, 238, 245, 0.7)';
+    if (pendingGameOver) {
       ctx.fillStyle = '#fbbf24';
-      ctx.fillText('COLLISION — game over (R to restart later)', 10, 50);
+      ctx.fillText('Ship destroyed', 10, 48);
     } else {
-      ctx.fillText('WASD / arrows move · dodge red obstacle', 10, 50);
+      ctx.fillText('WASD/arrows move · Space fire · H dmg · G score', 10, 48);
     }
   }
 
@@ -162,15 +225,37 @@ export function createPlayingScene({
       camera.setX(0);
       camera.setY(0);
       spawnTimer = 0;
-      collided = false;
       frozen = false;
       flashT = 0;
+      deathTimer = 0;
+      pendingGameOver = false;
+      score.reset();
+      if (runState) runState.lastScore = 0;
       spawnPlayer();
       spawnObstacle();
+
+      // Debug: H = take 1 damage, G = +100 score (verification without enemies).
+      onDebugKey = (e) => {
+        if (e.repeat || frozen || pendingGameOver) return;
+        if (e.code === 'KeyH' || e.key === 'h' || e.key === 'H') {
+          if (player && !player.isDead) {
+            player.takeDamage(1);
+            if (player.isDead || player.hp <= 0) handlePlayerDeath();
+          }
+        } else if (e.code === 'KeyG' || e.key === 'g' || e.key === 'G') {
+          score.add(100);
+        }
+      };
+      window.addEventListener('keydown', onDebugKey);
+
       if (setStatus) setStatus('Playing');
     },
 
     exit() {
+      if (onDebugKey) {
+        window.removeEventListener('keydown', onDebugKey);
+        onDebugKey = null;
+      }
       entities.clear();
       player = null;
       obstacle = null;
@@ -182,15 +267,30 @@ export function createPlayingScene({
     update(dt) {
       if (frozen) {
         flashT += dt;
+        if (pendingGameOver) {
+          deathTimer -= dt;
+          if (deathTimer <= 0) {
+            finishRun();
+            input.endFrame();
+            return;
+          }
+        }
         input.endFrame();
         return;
       }
 
+      // Advance invuln flash clock while alive (not only during death freeze).
+      if (player && !player.isDead && player._time < player.invulnerableUntil) {
+        flashT += dt;
+      } else if (!pendingGameOver) {
+        flashT = 0;
+      }
+
       camera.update(dt);
 
-      // Keep obstacle roughly in view for the collision demo until hit.
-      if (obstacle?.alive && !obstacle.hit) {
-        // Static in world space; camera scroll makes it move left on screen.
+      if (player) {
+        player.updateTimers(dt);
+        player.tryFire(entities);
       }
 
       entities.updateAll(dt, { camera, input });
@@ -201,23 +301,8 @@ export function createPlayingScene({
         spawnEnemy();
       }
 
-      // Player vs hazards (obstacle + enemies).
-      if (player?.alive) {
-        for (const e of entities.all()) {
-          if (!e.alive || e === player) continue;
-          if (!e.tags?.has('hazard')) continue;
-          if (aabbOverlap(player, e)) {
-            collided = true;
-            e.hit = true;
-            e.color = '#fbbf24';
-            player.color = '#facc15';
-            frozen = true;
-            if (setStatus) setStatus('Game over — collision');
-            onGameOver();
-            break;
-          }
-        }
-      }
+      resolveProjectileHits();
+      resolveHazardDamage();
 
       input.endFrame();
     },
@@ -226,21 +311,33 @@ export function createPlayingScene({
      * @param {number} _alpha
      */
     render(_alpha) {
-      // Clear full canvas buffer (already in logical space if ctx is scaled).
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       const dpr = canvas.width / viewWidth;
       ctx.scale(dpr, dpr);
 
-      // Debug-friendly clear each frame.
       ctx.fillStyle = '#0b1220';
       ctx.fillRect(0, 0, viewWidth, viewHeight);
 
       drawGrid();
       entities.renderAll(ctx, camera);
 
-      if (collided && Math.floor(flashT * 8) % 2 === 0) {
-        ctx.fillStyle = 'rgba(248, 113, 113, 0.12)';
+      // Invuln flash: dim ship briefly while invulnerable (color also yellow).
+      if (
+        player &&
+        player.alive &&
+        !player.isDead &&
+        player._time < player.invulnerableUntil &&
+        Math.floor(flashT * 12) % 2 === 0
+      ) {
+        const sx = player.x - camera.x;
+        const sy = player.y - camera.y;
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.35)';
+        ctx.fillRect(sx - 2, sy - 2, player.w + 4, player.h + 4);
+      }
+
+      if (pendingGameOver && Math.floor(flashT * 8) % 2 === 0) {
+        ctx.fillStyle = 'rgba(248, 113, 113, 0.14)';
         ctx.fillRect(0, 0, viewWidth, viewHeight);
       }
 
