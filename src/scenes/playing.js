@@ -1,7 +1,7 @@
 /**
  * Playing scene: auto-scrolling world, player ship with weapons/HP,
- * multi-phase enemy waves, phase-end bosses, hazards, score, HUD;
- * death → game-over; final boss → stage clear.
+ * multi-phase enemy waves, phase-end bosses, hazards, power-up pickups,
+ * score, HUD; death → game-over; final boss → stage clear.
  */
 
 import { createCamera } from '../engine/camera.js';
@@ -19,11 +19,19 @@ import {
   createStageDirector,
   DEFAULT_STAGES,
   loadStages,
-  DIRECTOR_MODE,
 } from '../game/stageDirector.js';
+import {
+  POWERUP_DROP_CHANCE,
+  POWERUP_TYPES,
+  applyPowerup,
+  createPowerupPickup,
+  getPowerupHudState,
+  randomPowerupType,
+} from '../game/powerups.js';
 
 const DEATH_FREEZE_SEC = 0.45;
 const CLEAR_FREEZE_SEC = 1.6;
+const COLLECT_TOAST_SEC = 1.5;
 /** Damage dealt by each player projectile hit. */
 const PROJECTILE_DAMAGE = 1;
 
@@ -78,6 +86,9 @@ export function createPlayingScene({
   let bossScoreAwarded = false;
   /** Bump so late stage JSON loads do not rebind an exited / restarted run. */
   let runToken = 0;
+  /** @type {string} */
+  let collectMessage = '';
+  let collectToastTimer = 0;
 
   // Debug keys (dev verification).
   /** @type {((e: KeyboardEvent) => void) | null} */
@@ -129,7 +140,7 @@ export function createPlayingScene({
 
   /**
    * Remove trash enemies/hazards and boss shots so the arena is readable.
-   * Keeps player, projectiles optional clear of boss hazards.
+   * Keeps player, pickups, and player projectiles.
    * @param {{ clearBossShots?: boolean, clearTrash?: boolean }} [opts]
    */
   function clearArena(opts = {}) {
@@ -139,8 +150,8 @@ export function createPlayingScene({
       if (!e.alive || e === player) continue;
       if (e.tags?.has('boss')) continue;
       if (e.tags?.has('playerProjectile')) continue;
+      if (e.tags?.has('powerup')) continue;
       if (clearTrash && (e.tags?.has('enemy') || e.type === 'obstacle' || e.type === 'hazardZone')) {
-        // Keep only if it's a boss-owned zone we want to clear via clearBossShots.
         if (e.kind === 'bossZone' || e.kind === 'bossShot') {
           if (clearBossShots) e.alive = false;
           continue;
@@ -148,7 +159,13 @@ export function createPlayingScene({
         e.alive = false;
         continue;
       }
-      if (clearBossShots && (e.kind === 'bossShot' || e.kind === 'bossZone' || e.kind === 'enemyShot' || e.type === 'enemyProjectile')) {
+      if (
+        clearBossShots &&
+        (e.kind === 'bossShot' ||
+          e.kind === 'bossZone' ||
+          e.kind === 'enemyShot' ||
+          e.type === 'enemyProjectile')
+      ) {
         e.alive = false;
       }
     }
@@ -161,7 +178,6 @@ export function createPlayingScene({
    * @param {string} bossId
    */
   function handleBossStart(phase, phaseIndex, bossId) {
-    // Despawn leftover trash so the fight is readable.
     clearArena({ clearTrash: true, clearBossShots: true });
     bossScoreAwarded = false;
     activeBoss = spawnBossForPhase(phaseIndex, {
@@ -222,6 +238,23 @@ export function createPlayingScene({
     });
   }
 
+  /**
+   * @param {import('../game/powerups.js').PowerupTypeId | string} type
+   * @param {number} x
+   * @param {number} y
+   */
+  function spawnPowerupAt(type, x, y) {
+    entities.add(createPowerupPickup({ type, x, y }));
+  }
+
+  /** Force-spawn a power-up slightly ahead of the player (debug / verification). */
+  function forceSpawnPowerup(type) {
+    if (!player) return;
+    const x = player.x + player.w + 40;
+    const y = player.y + player.h / 2 - 10;
+    spawnPowerupAt(type, x, y);
+  }
+
   function finishRun(opts = {}) {
     const finalScore = score.get();
     if (runState) runState.lastScore = finalScore;
@@ -248,7 +281,7 @@ export function createPlayingScene({
 
   /**
    * Multi-hit for entities with numeric `hp`; one-shot otherwise.
-   * Bosses use beginDeath() for a short dying animation before notify.
+   * Trash kills may drop power-ups; bosses award large score, no drops.
    */
   function resolveProjectileHits() {
     const projectiles = entities.queryByTag('playerProjectile');
@@ -258,9 +291,8 @@ export function createPlayingScene({
       if (!proj.alive) continue;
       for (const e of entities.all()) {
         if (!e.alive || e === proj) continue;
-        // Killable targets: tag `enemy` (units, bosses, optional destructible hazards).
         if (!e.tags?.has('enemy')) continue;
-        // Ignore targets in dying animation for extra hits (still block projectiles).
+        // Dying bosses still block projectiles.
         if (e.bossState === 'dying') {
           proj.alive = false;
           break;
@@ -272,7 +304,6 @@ export function createPlayingScene({
         const hasHp = typeof e.hp === 'number' && Number.isFinite(e.hp);
         if (hasHp) {
           e.hp = Math.max(0, e.hp - PROJECTILE_DAMAGE);
-          // Brief hit flash for multi-hit targets.
           if (e.hp > 0 && e.baseColor) {
             e.color = e.openColor || '#fef08a';
           }
@@ -280,8 +311,13 @@ export function createPlayingScene({
             onEntityKilled(e);
           }
         } else {
+          const dropX = e.x;
+          const dropY = e.y;
           e.alive = false;
           score.add(SCORE_ENEMY_KILL);
+          if (Math.random() < POWERUP_DROP_CHANCE) {
+            spawnPowerupAt(randomPowerupType(), dropX, dropY);
+          }
         }
         break;
       }
@@ -307,15 +343,19 @@ export function createPlayingScene({
       } else {
         e.alive = false;
       }
-      // Notify director once; dying animation continues via customUpdate.
       if (director?.isBossMode?.()) {
         director.notifyBossDefeated();
       }
       activeBoss = e.alive ? e : null;
       return;
     }
+    const dropX = e.x;
+    const dropY = e.y;
     e.alive = false;
     score.add(SCORE_ENEMY_KILL);
+    if (Math.random() < POWERUP_DROP_CHANCE) {
+      spawnPowerupAt(randomPowerupType(), dropX, dropY);
+    }
   }
 
   function resolveHazardDamage() {
@@ -323,7 +363,7 @@ export function createPlayingScene({
     for (const e of entities.all()) {
       if (!e.alive || e === player) continue;
       if (!e.tags?.has('hazard')) continue;
-      // Dying bosses no longer deal contact damage.
+      // Dying / intro bosses do not deal contact damage.
       if (e.bossState === 'dying' || e.bossState === 'intro') continue;
       if (aabbOverlap(player, e)) {
         const applied = player.takeDamage(1);
@@ -338,6 +378,22 @@ export function createPlayingScene({
         }
         break;
       }
+    }
+  }
+
+  function resolvePowerupCollect() {
+    if (!player?.alive || player.isDead) return;
+    const pickups = entities.queryByTag('powerup');
+    for (const p of pickups) {
+      if (!p.alive) continue;
+      if (!aabbOverlap(player, p)) continue;
+      const result = applyPowerup(player, p.powerupType);
+      p.alive = false;
+      if (result.applied && result.label) {
+        collectMessage = `GOT ${result.label.toUpperCase()}`;
+        collectToastTimer = COLLECT_TOAST_SEC;
+      }
+      break;
     }
   }
 
@@ -397,7 +453,7 @@ export function createPlayingScene({
     const barW = Math.min(360, viewWidth - 80);
     const barH = 10;
     const x = (viewWidth - barW) / 2;
-    const y = 40;
+    const y = 56;
 
     ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
     ctx.fillRect(x - 2, y - 2, barW + 4, barH + 4);
@@ -410,6 +466,26 @@ export function createPlayingScene({
     ctx.textAlign = 'center';
     const label = String(boss.kind || 'boss').toUpperCase();
     ctx.fillText(`${label}  ${hp}/${maxHp}`, viewWidth / 2, y + barH + 14);
+  }
+
+  function drawAegisOrbiter() {
+    if (!player?.alive || player.isDead) return;
+    const charges = player.aegisCharges ?? 0;
+    if (charges <= 0) return;
+
+    const cx = player.x + player.w / 2 - camera.x;
+    const cy = player.y + player.h / 2 - camera.y;
+    const orbitR = 22;
+    const t = player._time ?? 0;
+    for (let i = 0; i < charges; i++) {
+      const ang = t * 2.4 + (i * Math.PI * 2) / Math.max(charges, 1);
+      const ox = cx + Math.cos(ang) * orbitR;
+      const oy = cy + Math.sin(ang) * orbitR;
+      ctx.fillStyle = POWERUP_TYPES.aegis.color;
+      ctx.fillRect(ox - 4, oy - 4, 8, 8);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.strokeRect(ox - 4, oy - 4, 8, 8);
+    }
   }
 
   function drawHud() {
@@ -439,6 +515,30 @@ export function createPlayingScene({
       ctx.fillText(`${phaseLabel}${suffix}`, viewWidth / 2, 22);
     }
 
+    // Power-up status under HP bar.
+    const hud = getPowerupHudState(player);
+    const weaponLabel =
+      hud.weapon === 'spread'
+        ? 'Tri-beam'
+        : hud.weapon === 'rapid'
+          ? 'Overdrive'
+          : 'Base';
+    const parts = [`Wpn: ${weaponLabel}`, `Aegis: ${hud.aegisCharges}`];
+    if (hud.surgeRemaining > 0) {
+      parts.push(`Surge: ${hud.surgeRemaining.toFixed(1)}s`);
+    }
+    ctx.textAlign = 'left';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(232, 238, 245, 0.85)';
+    ctx.fillText(parts.join('  ·  '), 10, 42);
+
+    if (collectToastTimer > 0 && collectMessage) {
+      ctx.fillStyle = '#fde68a';
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(collectMessage, viewWidth / 2, 92);
+    }
+
     // Encounter banner (boss intro / phase clear / stage clear).
     if (encounterBanner) {
       ctx.textAlign = 'center';
@@ -449,7 +549,7 @@ export function createPlayingScene({
           : encounterBanner === 'PHASE CLEAR'
             ? 'rgba(125, 211, 252, 0.95)'
             : 'rgba(244, 114, 182, 0.95)';
-      ctx.fillText(encounterBanner, viewWidth / 2, viewHeight * 0.18);
+      ctx.fillText(encounterBanner, viewWidth / 2, viewHeight * 0.2);
     }
 
     if (director?.isBossMode?.() || activeBoss?.alive) {
@@ -461,12 +561,16 @@ export function createPlayingScene({
     ctx.fillStyle = 'rgba(232, 238, 245, 0.7)';
     if (pendingGameOver) {
       ctx.fillStyle = '#fbbf24';
-      ctx.fillText('Ship destroyed', 10, 48);
+      ctx.fillText('Ship destroyed', 10, 58);
     } else if (pendingStageClear || stageCleared) {
       ctx.fillStyle = '#4ade80';
-      ctx.fillText('Stage clear!', 10, 48);
+      ctx.fillText('Stage clear!', 10, 58);
     } else {
-      ctx.fillText('WASD/arrows move · Space fire · H dmg · G score · B boss', 10, 48);
+      ctx.fillText(
+        'WASD/arrows · Space fire · H dmg · G score · B boss · 1–4 power-ups',
+        10,
+        58,
+      );
     }
   }
 
@@ -486,6 +590,8 @@ export function createPlayingScene({
       encounterBanner = '';
       activeBoss = null;
       bossScoreAwarded = false;
+      collectMessage = '';
+      collectToastTimer = 0;
       score.reset();
       if (runState) runState.lastScore = 0;
       spawnPlayer();
@@ -500,7 +606,14 @@ export function createPlayingScene({
         director = makeDirector(stages);
       });
 
-      // Debug: H = take 1 damage, G = +100 score, B = skip to current phase boss.
+      // Scripted demo pickup mid-lane so a run can show collect without RNG.
+      spawnPowerupAt(
+        'spread',
+        camera.x + viewWidth * 0.55,
+        viewHeight * 0.5 - 10,
+      );
+
+      // Debug: H damage, G score, B boss skip, 1–4 power-ups.
       onDebugKey = (e) => {
         if (e.repeat || frozen || pendingGameOver || pendingStageClear) return;
         if (e.code === 'KeyH' || e.key === 'h' || e.key === 'H') {
@@ -517,6 +630,14 @@ export function createPlayingScene({
               setStatus(`Debug: boss ${director.getBossId() || ''}`);
             }
           }
+        } else if (e.key === '1' || e.code === 'Digit1') {
+          forceSpawnPowerup('spread');
+        } else if (e.key === '2' || e.code === 'Digit2') {
+          forceSpawnPowerup('rapid');
+        } else if (e.key === '3' || e.code === 'Digit3') {
+          forceSpawnPowerup('aegis');
+        } else if (e.key === '4' || e.code === 'Digit4') {
+          forceSpawnPowerup('surge');
         }
       };
       window.addEventListener('keydown', onDebugKey);
@@ -536,6 +657,8 @@ export function createPlayingScene({
       phaseLabel = '';
       encounterBanner = '';
       activeBoss = null;
+      collectMessage = '';
+      collectToastTimer = 0;
     },
 
     /**
@@ -556,11 +679,15 @@ export function createPlayingScene({
         return;
       }
 
-      // Advance invuln flash clock while alive (not only during death freeze).
       if (player && !player.isDead && player._time < player.invulnerableUntil) {
         flashT += dt;
       } else if (!pendingGameOver) {
         flashT = 0;
+      }
+
+      if (collectToastTimer > 0) {
+        collectToastTimer = Math.max(0, collectToastTimer - dt);
+        if (collectToastTimer === 0) collectMessage = '';
       }
 
       camera.update(dt);
@@ -570,19 +697,18 @@ export function createPlayingScene({
         player.tryFire(entities);
       }
 
-      // Stage timeline (spawns enemies/hazards; gates bosses at phase ends).
       if (director) {
         director.update(dt, { camera, player, entities, viewWidth, viewHeight });
       }
 
       entities.updateAll(dt, { camera, input, player, entities });
 
-      // If boss finished dying animation, drop reference.
       if (activeBoss && !activeBoss.alive) {
         activeBoss = null;
       }
 
       resolveProjectileHits();
+      resolvePowerupCollect();
       resolveHazardDamage();
 
       input.endFrame();
@@ -602,8 +728,8 @@ export function createPlayingScene({
 
       drawGrid();
       entities.renderAll(ctx, camera);
+      drawAegisOrbiter();
 
-      // Invuln flash: dim ship briefly while invulnerable (color also yellow).
       if (
         player &&
         player.alive &&

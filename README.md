@@ -52,16 +52,36 @@ Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?api
 - **Space / Enter** — fire (rate-limited) / confirm on game over
 - **Esc / M** — from game over, return to title menu
 - **H** — debug: take 1 damage · **G** — debug: +100 score · **B** — debug: skip to current phase boss
+- **1 / 2 / 3 / 4** — debug: force-spawn Tri-beam / Overdrive / Aegis / Surge pickups near the ship
 - Touch: left half steer, right half fire
 
-Health bar, score, and **phase label** are drawn on the play HUD. A run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Each phase ends in a **multi-phase boss** (Harvester → Interceptor → Overmind): telegraphed attacks, multi-hit HP, substantial score on defeat, then phase clear / next phase. Beating the final boss **stages clears** the run; boss contact and hazard shots can kill the player (normal invuln window). Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage; at 0 HP → game over. Trash units tagged `enemy` award score on one-shot kills; bosses require multiple hits. If `rtypeweb.player.id` is set (Register view), game over / stage clear `POST`s `/api/score` with `{ playerId, value }`.
+Health bar, power-up status, score, and **phase label** are drawn on the play HUD. A run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Each phase ends in a **multi-phase boss** (Harvester → Interceptor → Overmind): telegraphed attacks, multi-hit HP, substantial score on defeat, then phase clear / next phase. Beating the final boss **stages clears** the run; boss contact and hazard shots can kill the player (normal invuln window). Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage; at 0 HP → game over. Trash units tagged `enemy` award score on one-shot kills and may drop power-ups; bosses require multiple hits. If `rtypeweb.player.id` is set (Register view), game over / stage clear `POST`s `/api/score` with `{ playerId, value }`.
 
 Stage / wave data: **`/public/assets/data/stages.json`** (timeline events + per-phase `boss` id). The engine falls back to an in-code default script if the file cannot be loaded.
+
+### Power-ups
+
+Original combat upgrades (not copyrighted R-Type assets). Pickups drop from defeated enemies (~30%) and one scripted Tri-beam appears early in each run. Colors differ per type; collecting shows a brief **GOT [NAME]** toast.
+
+| Key | Id | Name | Effect |
+|-----|-----|------|--------|
+| `1` | `spread` | **Tri-beam** | Primary fire launches 3 projectiles (center + ±12°) |
+| `2` | `rapid` | **Overdrive** | Fire cooldown ×0.45 (faster single stream) |
+| `3` | `aegis` | **Aegis shell** | +1 absorb charge (next hazard hit negated + brief invuln so one contact = one charge); orbiting squares show charges |
+| `4` | `surge` | **Surge thrusters** | Move speed ×1.45 for 12s |
+
+**Stacking / replacement rules** (also documented in `src/game/powerups.js`):
+
+1. **Weapon modes** (`spread` / `rapid`) are mutually exclusive — collecting one **replaces** the other. Default is base single-shot / normal cooldown. Not timed.
+2. **Aegis** is independent of weapon mode. Each pickup adds **+1** charge, **max 2**. At cap, further pickups do not increase charges. Charges last until consumed or death. Absorb grants the same short invulnerability window as a normal hit so continuous overlap spends **one charge per contact**, not per frame.
+3. **Surge** is independent of weapon and aegis. Re-collect **refreshes** the 12s timer; multipliers do not stack.
+4. **Death / new run** clears all power-up state with the player entity.
+5. **Controls** stay the same; only fire pattern/rate, absorb, and move speed change.
 
 ### Smoke tests
 
 ```bash
-# Game modules (score, damage, enemies, bosses, stage director) — no server
+# Game modules (score, damage, power-ups, enemies, bosses, stage director) — no server
 npm run smoke:game
 
 # API (with server listening)
@@ -176,11 +196,12 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   │   ├── score.js        # Per-run score API
 │   │   ├── enemies.js      # Straight / sine / aimer factories
 │   │   ├── hazards.js      # Block / spike / zone factories
+│   │   ├── powerups.js     # Tri-beam / Overdrive / Aegis / Surge
 │   │   ├── bosses.js       # Phase-end multi-phase bosses
 │   │   └── stageDirector.js # JSON timeline multi-phase director + boss gate
 │   └── scenes/
 │       ├── menu.js         # In-engine menu stub
-│       ├── playing.js      # Combat, waves, bosses, HUD, hazards
+│       ├── playing.js      # Combat, waves, bosses, power-ups, HUD
 │       └── gameover.js     # Final score / stage clear, submit, retry / title
 ├── public/
 │   └── assets/
@@ -228,6 +249,7 @@ Player faces / advances **+X (right)**. Camera `x` increases as the playfield st
 - `player.takeDamage(n)` / `player.heal(n)` on the ship controller (`src/game/player.js`)
 - `createRunScore()` → `add(points)`, `get()`, `reset()` (`src/game/score.js`)
 - `spawnEnemy(kind, opts)` / `spawnHazard(kind, opts)` (`src/game/enemies.js`, `src/game/hazards.js`)
+- `applyPowerup(player, type)` / `createPowerupPickup({ type, x, y })` (`src/game/powerups.js`)
 - `createStageDirector(stages, hooks)` / `loadStages()` (`src/game/stageDirector.js`)
 - Identity: `loadPlayer()` → use `player.id` as API `playerId` when submitting
 
