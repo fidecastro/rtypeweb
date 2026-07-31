@@ -5,6 +5,7 @@
  */
 import { fetchLeaderboard, registerPlayer } from './api.js';
 import { loadPlayer, savePlayer } from './player.js';
+import { applyPortalHandoff } from './portalHandoff.js';
 import { createLoop } from './engine/loop.js';
 import { createInput } from './engine/input.js';
 import { createGame } from './engine/game.js';
@@ -486,17 +487,39 @@ function wireScoresRefresh() {
   });
 }
 
-function boot() {
-  setPlayerBadge();
+async function boot() {
   wireAudioUnlock();
   wireMuteToggle();
   wireNav();
   wireRegister();
   wireScoresRefresh();
+
+  // Portal handoff before first badge/view — never blocks menu on failure.
+  let handoffResult = 'skipped';
+  try {
+    handoffResult = await applyPortalHandoff();
+  } catch (err) {
+    console.warn('[rtypeweb] portal handoff error', err);
+    handoffResult = 'failed';
+  }
+
+  setPlayerBadge();
+
+  if (handoffResult === 'applied') {
+    const player = loadPlayer();
+    setStatus(
+      player
+        ? `Signed in via portal as ${player.nickname}`
+        : 'Signed in via portal',
+    );
+  } else if (handoffResult === 'failed') {
+    setStatus('Portal sign-in could not be verified — register or try again from the portal.');
+  }
+
   // Queue menu music intent (starts after first gesture unlock).
   audio.playMusic('menu');
   showView(viewFromHash());
-  console.log('[rtypeweb] menu shell booted');
+  console.log('[rtypeweb] menu shell booted', { handoff: handoffResult });
 }
 
-boot();
+void boot();

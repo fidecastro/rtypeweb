@@ -62,9 +62,51 @@ Health bar, power-up status, score, and **phase label** are drawn on the play HU
 | State | Play | Game over score |
 |-------|------|-----------------|
 | **Registered** (`localStorage` `rtypeweb.player` with `id`) | Full combat | `POST /api/score` with `{ playerId, value }`; status shows *Score saved as …* or *Submit failed: …* (API / network) |
+| **Portal handoff** (verified `portalToken` on load) | Same as registered — profile saved without the Register form | Same as registered (shared Turso `players` row) |
 | **Unregistered** (no profile) | Allowed — no gate | Score is **not** submitted; status *Not registered — score not submitted* |
 
 Home and High Scores always **re-fetch** `GET /api/leaderboard` when those views are shown (including Esc/M back to title after a run).
+
+### Portal auth handoff (shared Turso)
+
+When a player opens this game from the [web games portal](https://github.com/fidecastro/webgamesportal) **Play** link, the portal adds handoff query params:
+
+| Param | Meaning |
+|-------|---------|
+| `portalToken` | Short-lived HMAC handoff token (required to inherit identity) |
+| `portalPlayerId` | Shared `players.id` (informational — **not** trusted alone) |
+| `portalNickname` | Shared nickname (informational) |
+| `portalEmail` | Shared email (informational) |
+
+On boot, `src/portalHandoff.js` verifies the token against the portal:
+
+```
+GET {portalBase}/api/auth/verify?token=<portalToken>
+```
+
+On success, the live player from the verify response is stored under `localStorage` key `rtypeweb.player` (`{ id, nickname, email }`) — the same shape as Register. The badge shows *Playing as …* and game-over score submit works without the in-game form.
+
+**Portal origin (`portalBase`):**
+
+1. Query override: `?portalBase=https://…` (http/https only; non-loopback HTTPS allowed — unlike `apiBase`)
+2. Else `localStorage` key `rtypeweb.portalBase` if a valid override was stored
+3. Else production default: `https://webgamesportal.vercel.app`
+
+Handoff query params (including `portalToken` and `portalBase`) are stripped from the address bar after consume via `history.replaceState`, preserving hash routes and unrelated params such as `apiBase`.
+
+If verify fails (network, expired/invalid token), the game does **not** adopt raw query identity; any existing local profile is left alone, Register remains available, and a non-blocking status message is shown.
+
+**Standalone visits** (no `portalToken`) keep today’s flow: optional Register, unregistered play allowed.
+
+#### Shared database (ops)
+
+Production `LIBSQL_URL` / `LIBSQL_AUTH_TOKEN` must match the portal’s so portal-created `players` rows are visible to `POST /api/score`. Divergent databases yield verify success but score **404 PLAYER_NOT_FOUND**. See `.env.example`.
+
+#### Local dual-server check
+
+1. Portal on `:3000` and this game on another port (or same machine with shared `LIBSQL_*` / copied player row).
+2. Sign in on the portal, click **Play** (or copy the launch URL), rewrite the game host to your local origin and add `portalBase=http://localhost:3000` if needed.
+3. Expect: badge *Playing as …*; `localStorage.rtypeweb.player` matches verify; Play → game over → score submit **200** when the game DB contains that player.
 
 ### API down / static-only
 
@@ -116,8 +158,10 @@ With `npm run api` and the browser at [http://localhost:3000](http://localhost:3
 5. **Top 10 reflects run** — Esc/M → title leaderboard includes the new score when it ranks in top 10 (or re-load High Scores).
 6. **Unregistered** — `localStorage.removeItem('rtypeweb.player')` → Play → game over shows *Not registered — score not submitted*, no crash.
 7. **API down** — stop the API / use `npm start` only → leaderboard/register error states; Play still works; registered game over shows *Submit failed: …*.
+8. **Portal handoff** — open with a valid `?portalToken=…` (from a running portal session) and `?portalBase=…` if not production → badge *Playing as …* without Register; address bar no longer contains `portalToken`; game-over score submit succeeds when DB is shared. Garbage token → no crash, profile not forged from query params, Register still works.
+9. **Direct visit** — no handoff params → existing profile or Register flow unchanged.
 
-Scripted coverage for the same loop seams: `npm run smoke:game` (game-over submit/unregistered/network) and `API_BASE=… npm run smoke` (register → score → leaderboard).
+Scripted coverage for the same loop seams: `npm run smoke:game` (game-over submit/unregistered/network + portal handoff helpers) and `API_BASE=… npm run smoke` (register → score → leaderboard).
 
 ## Player / score API
 
@@ -221,6 +265,7 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── audio.js            # Web Audio SFX/music, mute, gesture unlock
 │   ├── api.js              # register / leaderboard / submitScore + loopback apiBase
 │   ├── player.js           # localStorage identity { id, nickname, email }
+│   ├── portalHandoff.js    # Portal token verify → rtypeweb.player
 │   ├── styles.css          # Retro menu styling
 │   ├── engine/             # Fixed-timestep loop, input, camera, entities
 │   ├── game/
@@ -288,14 +333,14 @@ Player faces / advances **+X (right)**. Camera `x` increases as the playfield st
 - `createStageDirector(stages, hooks)` / `loadStages()` (`src/game/stageDirector.js`)
 - Identity: `loadPlayer()` → use `player.id` as API `playerId` when submitting
 
-Auth (passwords/OAuth) is out of scope for this slice. Sprites/backgrounds/VFX are procedural pixel-art under `src/game/visuals/` (no external atlas required). Audio is procedural via `src/audio.js`.
+In-game passwords/OAuth are out of scope; portal identity is inherited via the handoff contract above when launched from the web games portal. Sprites/backgrounds/VFX are procedural pixel-art under `src/game/visuals/` (no external atlas required). Audio is procedural via `src/audio.js`.
 
 ## Deploy to Vercel
 
 1. Import this Git repository (or `vercel` / `vercel --prod` from the CLI).
 2. **Root Directory:** repository root (this package). **Framework Preset:** Other / no framework.
-3. Set environment variables: `LIBSQL_URL`, `LIBSQL_AUTH_TOKEN` (Turso/libSQL).
-4. Deploy. Static files are served from the root; `api/*.js` become serverless functions.
+3. Set environment variables: `LIBSQL_URL`, `LIBSQL_AUTH_TOKEN` (Turso/libSQL) — **same database as the web games portal** if you want portal handoff + score submit to work together.
+4. Deploy. Static files are served from the root; `api/*.js` become serverless functions. Portal verify is called client-side at the portal origin (default `https://webgamesportal.vercel.app`); no extra game-side server env for handoff.
 
 ### Build packaging (static shell + API)
 
