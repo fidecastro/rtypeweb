@@ -14,6 +14,7 @@ import { loadPlayer } from '../player.js';
  * @param {() => void} deps.onRestart
  * @param {() => void} deps.onMenu
  * @param {() => number} deps.getLastScore
+ * @param {() => boolean} [deps.getCleared]
  * @param {(text: string) => void} [deps.setStatus]
  * @param {number} deps.viewWidth
  * @param {number} deps.viewHeight
@@ -25,6 +26,7 @@ export function createGameOverScene({
   onRestart,
   onMenu,
   getLastScore,
+  getCleared,
   setStatus,
   viewWidth,
   viewHeight,
@@ -39,16 +41,18 @@ export function createGameOverScene({
     enter() {
       submittedThisEnter = false;
       const finalScore = typeof getLastScore === 'function' ? getLastScore() : 0;
+      const cleared = typeof getCleared === 'function' ? !!getCleared() : false;
       const player = loadPlayer();
+      const outcomeLabel = cleared ? 'Stage clear' : 'Game over';
 
       if (!player?.id) {
         submitStatus = 'Not registered — score not submitted';
         if (setStatus) {
-          setStatus(`Game over — score ${finalScore} (not registered)`);
+          setStatus(`${outcomeLabel} — score ${finalScore} (not registered)`);
         }
       } else {
         submitStatus = 'Submitting score…';
-        if (setStatus) setStatus(`Game over — score ${finalScore}`);
+        if (setStatus) setStatus(`${outcomeLabel} — score ${finalScore}`);
         if (!submittedThisEnter) {
           submittedThisEnter = true;
           // API contract: playerId; storage shape: player.id (DEV-148).
@@ -97,6 +101,7 @@ export function createGameOverScene({
      */
     render(_alpha) {
       const finalScore = typeof getLastScore === 'function' ? getLastScore() : 0;
+      const cleared = typeof getCleared === 'function' ? !!getCleared() : false;
 
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -106,10 +111,14 @@ export function createGameOverScene({
       ctx.fillStyle = '#0b1220';
       ctx.fillRect(0, 0, viewWidth, viewHeight);
 
-      ctx.fillStyle = '#f87171';
+      ctx.fillStyle = cleared ? '#4ade80' : '#f87171';
       ctx.font = 'bold 28px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Game Over', viewWidth / 2, viewHeight / 2 - 48);
+      ctx.fillText(
+        cleared ? 'Stage Clear' : 'Game Over',
+        viewWidth / 2,
+        viewHeight / 2 - 48,
+      );
 
       ctx.fillStyle = '#e8eef5';
       ctx.font = '22px system-ui, sans-serif';

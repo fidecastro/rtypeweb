@@ -1,6 +1,7 @@
 /**
  * Multi-phase stage / wave director driven by JSON timeline scripts.
  * Advances phase timers, fires spawn events once at `at` seconds, notifies UI.
+ * Gates phase ends on boss encounters when a phase declares a `boss` id.
  */
 
 /** Minimal offline / smoke fallback when stages.json is unavailable. */
@@ -11,6 +12,7 @@ export const DEFAULT_STAGES = {
       label: 'Approach',
       durationSec: 20,
       scrollSpeed: 90,
+      boss: 'harvester',
       events: [
         { at: 0.5, spawn: 'hazard', kind: 'block', y: 0.35 },
         { at: 2, spawn: 'enemy', kind: 'straight', y: 0.3 },
@@ -25,6 +27,7 @@ export const DEFAULT_STAGES = {
       label: 'Intercept',
       durationSec: 24,
       scrollSpeed: 105,
+      boss: 'interceptor',
       events: [
         { at: 1, spawn: 'enemy', kind: 'sine', y: 0.25, amplitude: 50 },
         { at: 2, spawn: 'enemy', kind: 'sine', y: 0.7, amplitude: 45 },
@@ -42,6 +45,7 @@ export const DEFAULT_STAGES = {
       label: 'Assault',
       durationSec: 28,
       scrollSpeed: 120,
+      boss: 'overmind',
       events: [
         { at: 0.5, spawn: 'enemy', kind: 'aimer', y: 0.3 },
         { at: 1.5, spawn: 'enemy', kind: 'aimer', y: 0.7 },
@@ -63,6 +67,14 @@ export const DEFAULT_STAGES = {
 };
 
 const STAGES_URL = '/public/assets/data/stages.json';
+
+/** Director encounter modes. */
+export const DIRECTOR_MODE = {
+  WAVE: 'wave',
+  BOSS: 'boss',
+  OUTRO: 'outro',
+  CLEARED: 'cleared',
+};
 
 /**
  * Validate / normalize stages payload; fall back to DEFAULT_STAGES if unusable.
@@ -98,7 +110,7 @@ export async function loadStages(url = STAGES_URL) {
 }
 
 /**
- * Timeline director for multi-phase runs.
+ * Timeline director for multi-phase runs with optional phase-end bosses.
  *
  * @param {typeof DEFAULT_STAGES} stagesData
  * @param {object} hooks
@@ -106,6 +118,9 @@ export async function loadStages(url = STAGES_URL) {
  * @param {(ev: object, ctx: object) => void} hooks.spawnHazard
  * @param {(phase: object, index: number) => void} [hooks.onPhaseChange]
  * @param {(speed: number) => void} [hooks.setScrollSpeed]
+ * @param {(phase: object, index: number, bossId: string) => void} [hooks.onBossStart]
+ * @param {(phase: object, index: number) => void} [hooks.onBossOutro]
+ * @param {() => void} [hooks.onStageClear]
  */
 export function createStageDirector(stagesData, hooks) {
   let stages = normalizeStages(stagesData);
@@ -117,9 +132,22 @@ export function createStageDirector(stagesData, hooks) {
   /** Seconds remaining for phase-label banner flash. */
   let bannerT = 0;
   let finished = false;
+  /** @type {string} */
+  let mode = DIRECTOR_MODE.WAVE;
+  /** Outro countdown after boss defeat. */
+  let outroT = 0;
+  /** Scroll speed to restore after a boss (from next phase or last known). */
+  let savedScrollSpeed = 90;
 
   function currentPhase() {
     return stages.phases[phaseIndex] ?? null;
+  }
+
+  function phaseBossId(phase) {
+    if (!phase) return '';
+    const b = phase.boss;
+    if (b == null || b === false || b === '') return '';
+    return String(b);
   }
 
   function beginPhase(index) {
@@ -127,17 +155,19 @@ export function createStageDirector(stagesData, hooks) {
     phaseTime = 0;
     fired = new Set();
     finished = false;
+    mode = DIRECTOR_MODE.WAVE;
+    outroT = 0;
     const phase = currentPhase();
     bannerT = 2.0;
     if (phase) {
+      if (phase.scrollSpeed != null) {
+        savedScrollSpeed = Number(phase.scrollSpeed) || 90;
+        if (typeof hooks.setScrollSpeed === 'function') {
+          hooks.setScrollSpeed(savedScrollSpeed);
+        }
+      }
       if (typeof hooks.onPhaseChange === 'function') {
         hooks.onPhaseChange(phase, phaseIndex);
-      }
-      if (
-        phase.scrollSpeed != null &&
-        typeof hooks.setScrollSpeed === 'function'
-      ) {
-        hooks.setScrollSpeed(Number(phase.scrollSpeed) || 90);
       }
     }
   }
@@ -149,6 +179,42 @@ export function createStageDirector(stagesData, hooks) {
       hooks.spawnEnemy(ev, ctx);
     } else if (spawn === 'hazard' && typeof hooks.spawnHazard === 'function') {
       hooks.spawnHazard(ev, ctx);
+    }
+  }
+
+  function enterBossMode() {
+    const phase = currentPhase();
+    if (!phase) return false;
+    const bossId = phaseBossId(phase);
+    if (!bossId) return false;
+    mode = DIRECTOR_MODE.BOSS;
+    const duration = Number(phase.durationSec ?? 30);
+    phaseTime = duration;
+    bannerT = 2.2;
+    // Freeze scroll during boss for a stable arena.
+    if (typeof hooks.setScrollSpeed === 'function') {
+      hooks.setScrollSpeed(0);
+    }
+    if (typeof hooks.onBossStart === 'function') {
+      hooks.onBossStart(phase, phaseIndex, bossId);
+    }
+    return true;
+  }
+
+  function advanceOrClear() {
+    if (phaseIndex < stages.phases.length - 1) {
+      beginPhase(phaseIndex + 1);
+      return;
+    }
+    // Final boss (or final phase without boss) complete → stage clear.
+    mode = DIRECTOR_MODE.CLEARED;
+    finished = true;
+    bannerT = 2.5;
+    if (typeof hooks.setScrollSpeed === 'function') {
+      hooks.setScrollSpeed(0);
+    }
+    if (typeof hooks.onStageClear === 'function') {
+      hooks.onStageClear();
     }
   }
 
@@ -176,8 +242,28 @@ export function createStageDirector(stagesData, hooks) {
       if (!Number.isFinite(t) || t <= 0) return;
 
       totalTime += t;
-      phaseTime += t;
       if (bannerT > 0) bannerT = Math.max(0, bannerT - t);
+
+      // Outro: short pause after boss defeat, then next phase or clear.
+      if (mode === DIRECTOR_MODE.OUTRO) {
+        outroT -= t;
+        if (outroT <= 0) {
+          advanceOrClear();
+        }
+        return;
+      }
+
+      // Boss fight: freeze wave timeline (no events, no phase advance).
+      if (mode === DIRECTOR_MODE.BOSS) {
+        return;
+      }
+
+      if (mode === DIRECTOR_MODE.CLEARED) {
+        return;
+      }
+
+      // Wave mode.
+      phaseTime += t;
 
       const phase = currentPhase();
       if (!phase) return;
@@ -196,18 +282,86 @@ export function createStageDirector(stagesData, hooks) {
       const duration = Number(phase.durationSec ?? 30);
       if (phaseTime < duration) return;
 
+      // Phase body complete.
+      if (phaseBossId(phase)) {
+        enterBossMode();
+        return;
+      }
+
       if (phaseIndex < stages.phases.length - 1) {
         beginPhase(phaseIndex + 1);
         return;
       }
 
-      // Last phase complete: loop its timeline so a continuous run never idles.
+      // Last phase with no boss: loop timeline (legacy continuous-run behavior).
       phaseTime = 0;
       fired = new Set();
       bannerT = 1.2;
       if (typeof hooks.onPhaseChange === 'function') {
         hooks.onPhaseChange(phase, phaseIndex);
       }
+    },
+
+    /**
+     * Playing scene calls this when the active boss is defeated.
+     * Starts outro, then advances phase or clears the stage.
+     * @returns {boolean} true if a boss outro was accepted
+     */
+    notifyBossDefeated() {
+      if (mode !== DIRECTOR_MODE.BOSS) return false;
+      mode = DIRECTOR_MODE.OUTRO;
+      outroT = 1.4;
+      bannerT = 2.0;
+      const phase = currentPhase();
+      if (typeof hooks.onBossOutro === 'function' && phase) {
+        hooks.onBossOutro(phase, phaseIndex);
+      }
+      return true;
+    },
+
+    /**
+     * Debug / smoke: jump immediately to the current phase's boss (if any).
+     * @returns {boolean}
+     */
+    skipToBoss() {
+      if (finished || mode === DIRECTOR_MODE.CLEARED) return false;
+      if (mode === DIRECTOR_MODE.BOSS) return true;
+      if (mode === DIRECTOR_MODE.OUTRO) return false;
+      const phase = currentPhase();
+      if (!phaseBossId(phase)) return false;
+      // Stop further wave events; enter boss now.
+      const duration = Number(phase.durationSec ?? 30);
+      phaseTime = duration;
+      return enterBossMode();
+    },
+
+    /**
+     * Debug: jump to a phase index and immediately start its boss.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    skipToPhaseBoss(index) {
+      if (finished) return false;
+      const i = Math.floor(Number(index));
+      if (!Number.isFinite(i) || i < 0 || i >= stages.phases.length) return false;
+      beginPhase(i);
+      return this.skipToBoss();
+    },
+
+    getMode() {
+      return mode;
+    },
+
+    isBossMode() {
+      return mode === DIRECTOR_MODE.BOSS;
+    },
+
+    isCleared() {
+      return mode === DIRECTOR_MODE.CLEARED || finished;
+    },
+
+    getBossId() {
+      return phaseBossId(currentPhase());
     },
 
     getPhaseIndex() {
@@ -237,6 +391,10 @@ export function createStageDirector(stagesData, hooks) {
 
     getPhaseCount() {
       return stages.phases.length;
+    },
+
+    isFinished() {
+      return finished;
     },
   };
 }

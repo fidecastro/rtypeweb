@@ -32,10 +32,21 @@ import {
   createStageDirector,
   DEFAULT_STAGES,
   normalizeStages,
+  DIRECTOR_MODE,
 } from "../src/game/stageDirector.js";
+import {
+  createBoss,
+  spawnBossForPhase,
+  bossScoreFor,
+  bossHpFor,
+  BOSS_KINDS,
+  BOSS_SCORES,
+  createBossProjectile,
+} from "../src/game/bosses.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { aabbOverlap } from "../src/engine/collision.js";
 
 let failed = 0;
 
@@ -205,7 +216,7 @@ console.log("hazard factories");
   assert("spawnHazard spike", spawnHazard("spike", opts).kind === "spike");
 }
 
-console.log("stage director");
+console.log("stage director (no bosses — legacy advance)");
 {
   /** @type {string[]} */
   const spawned = [];
@@ -262,11 +273,8 @@ console.log("stage director");
   assert("label One", dir.getPhaseLabel() === "One");
   assert("scroll from phase start", scroll === 90);
   assert("phase change on begin", phases[0] === "One");
+  assert("mode wave", dir.getMode() === DIRECTOR_MODE.WAVE);
 
-  // Fire event at t=0 on first update tick after begin — beginPhase does not auto-fire.
-  // Events at `at: 0` fire when phaseTime >= 0, which is true after any update... 
-  // Actually phaseTime starts 0, and first update adds dt then checks phaseTime >= at.
-  // So at:0 fires on first update.
   dir.update(0.1);
   assert("fires at:0 enemy", spawned.includes("enemy:straight"), JSON.stringify(spawned));
 
@@ -276,7 +284,7 @@ console.log("stage director");
   dir.update(0.5); // ~1.6
   assert("fires sine at 1.5", spawned.includes("enemy:sine"), JSON.stringify(spawned));
 
-  // Advance past phase 1 duration (2s): phaseTime was ~1.6, need 0.5+ more
+  // Advance past phase 1 duration (2s): no boss → auto-advance
   dir.update(0.6);
   assert("advanced to phase 2", dir.getPhaseIndex() === 1, `idx=${dir.getPhaseIndex()}`);
   assert("label Two", dir.getPhaseLabel() === "Two");
@@ -308,6 +316,193 @@ console.log("stage director");
   assert("DEFAULT_STAGES has 3+ phases", DEFAULT_STAGES.phases.length >= 3);
 }
 
+console.log("boss factories + multi-hit");
+{
+  const camera = createCamera({ x: 0, y: 0, width: 960, height: 540, scrollSpeed: 0 });
+  const opts = { camera, viewWidth: 960, viewHeight: 540 };
+
+  assert("three boss kinds", BOSS_KINDS.length >= 3);
+
+  for (const kind of BOSS_KINDS) {
+    const boss = createBoss(kind, opts);
+    assert(
+      `${kind} tags`,
+      boss.tags.has("enemy") && boss.tags.has("hazard") && boss.tags.has("boss"),
+    );
+    assert(`${kind} has hp`, typeof boss.hp === "number" && boss.hp === bossHpFor(kind));
+    assert(`${kind} maxHp`, boss.maxHp === boss.hp);
+    assert(`${kind} score ≫ trash`, bossScoreFor(kind) > SCORE_ENEMY_KILL * 5);
+    assert(`${kind} score constant`, BOSS_SCORES[kind] === bossScoreFor(kind));
+  }
+
+  const harvester = createBoss("harvester", { ...opts, hp: 5 });
+  assert("custom hp", harvester.hp === 5);
+
+  // Simulated multi-hit: N hits kill only after HP depleted.
+  const entities = createEntityList();
+  const target = createBoss("harvester", { ...opts, hp: 4 });
+  entities.add(target);
+  let hits = 0;
+  while (target.hp > 0 && hits < 20) {
+    target.hp -= 1;
+    hits += 1;
+  }
+  assert("multi-hit needs hp hits", hits === 4);
+  assert("hp depleted", target.hp === 0);
+  if (typeof target.beginDeath === "function") target.beginDeath();
+  assert("dying state", target.bossState === "dying");
+
+  // Projectile-style resolution helper (mirrors playing scene logic).
+  function resolveHit(proj, e) {
+    if (!aabbOverlap(proj, e)) return false;
+    proj.alive = false;
+    if (typeof e.hp === "number") {
+      e.hp = Math.max(0, e.hp - 1);
+      if (e.hp <= 0 && typeof e.beginDeath === "function") e.beginDeath();
+      return true;
+    }
+    e.alive = false;
+    return true;
+  }
+
+  const boss2 = createBoss("interceptor", { ...opts, hp: 3 });
+  for (let i = 0; i < 3; i++) {
+    const proj = {
+      alive: true,
+      x: boss2.x + 2,
+      y: boss2.y + 2,
+      w: 12,
+      h: 4,
+    };
+    resolveHit(proj, boss2);
+  }
+  assert("3 projectiles kill hp=3 boss", boss2.hp === 0 && boss2.bossState === "dying");
+
+  const viaPhase = spawnBossForPhase(2, opts);
+  assert("spawnBossForPhase 2 → overmind", viaPhase.kind === "overmind");
+
+  const shot = createBossProjectile({ x: 100, y: 100, vx: -200 });
+  assert("boss shot hazard only", shot.tags.has("hazard") && !shot.tags.has("enemy"));
+
+  // Boss score is substantial vs trash kill.
+  const s = createRunScore();
+  s.add(bossScoreFor("harvester"));
+  assert("boss score substantial", s.get() >= 2000 && s.get() > SCORE_ENEMY_KILL);
+}
+
+console.log("stage director boss gate");
+{
+  /** @type {string[]} */
+  const bosses = [];
+  /** @type {string[]} */
+  const outros = [];
+  let cleared = 0;
+  let scroll = 90;
+  /** @type {string[]} */
+  const spawned = [];
+
+  const stages = {
+    phases: [
+      {
+        id: "p1",
+        label: "One",
+        durationSec: 1.5,
+        scrollSpeed: 90,
+        boss: "harvester",
+        events: [{ at: 0, spawn: "enemy", kind: "straight", y: 0.3 }],
+      },
+      {
+        id: "p2",
+        label: "Two",
+        durationSec: 1.0,
+        scrollSpeed: 110,
+        boss: "interceptor",
+        events: [{ at: 0.1, spawn: "enemy", kind: "aimer", y: 0.4 }],
+      },
+      {
+        id: "p3",
+        label: "Three",
+        durationSec: 1.0,
+        scrollSpeed: 120,
+        boss: "overmind",
+        events: [{ at: 0, spawn: "hazard", kind: "spike", y: 0.5 }],
+      },
+    ],
+  };
+
+  const dir = createStageDirector(stages, {
+    spawnEnemy(ev) {
+      spawned.push(`enemy:${ev.kind}`);
+    },
+    spawnHazard(ev) {
+      spawned.push(`hazard:${ev.kind}`);
+    },
+    setScrollSpeed(s) {
+      scroll = s;
+    },
+    onBossStart(phase, index, bossId) {
+      bosses.push(`${index}:${bossId}`);
+    },
+    onBossOutro(phase, index) {
+      outros.push(`${index}`);
+    },
+    onStageClear() {
+      cleared += 1;
+    },
+  });
+
+  dir.update(0.2);
+  assert("wave spawns before boss", spawned.includes("enemy:straight"));
+  assert("still wave mode", dir.getMode() === DIRECTOR_MODE.WAVE);
+
+  // Reach phase duration → boss mode, do not advance phase.
+  dir.update(1.5);
+  assert("entered boss mode", dir.getMode() === DIRECTOR_MODE.BOSS, `mode=${dir.getMode()}`);
+  assert("still phase 0 during boss", dir.getPhaseIndex() === 0);
+  assert("boss start fired", bosses.includes("0:harvester"), JSON.stringify(bosses));
+  assert("scroll frozen for boss", scroll === 0);
+
+  // Time during boss does not advance phase / re-fire.
+  const spawnCount = spawned.length;
+  dir.update(5);
+  assert("boss mode freezes waves", dir.getMode() === DIRECTOR_MODE.BOSS);
+  assert("no extra spawns in boss", spawned.length === spawnCount);
+  assert("still phase 0", dir.getPhaseIndex() === 0);
+
+  // Defeat boss → outro → next phase.
+  const ok = dir.notifyBossDefeated();
+  assert("notifyBossDefeated accepted", ok === true);
+  assert("outro mode", dir.getMode() === DIRECTOR_MODE.OUTRO);
+  assert("outro recorded", outros.includes("0"), JSON.stringify(outros));
+
+  dir.update(1.5);
+  assert("advanced after boss", dir.getPhaseIndex() === 1, `idx=${dir.getPhaseIndex()}`);
+  assert("wave after boss", dir.getMode() === DIRECTOR_MODE.WAVE);
+  assert("scroll restored phase 2", scroll === 110);
+
+  // skipToBoss debug path
+  const skipped = dir.skipToBoss();
+  assert("skipToBoss works", skipped === true && dir.getMode() === DIRECTOR_MODE.BOSS);
+  assert("boss 2 start", bosses.includes("1:interceptor"), JSON.stringify(bosses));
+  dir.notifyBossDefeated();
+  dir.update(1.5);
+  assert("phase 3 after boss 2", dir.getPhaseIndex() === 2);
+
+  dir.skipToBoss();
+  assert("final boss mode", dir.getMode() === DIRECTOR_MODE.BOSS && dir.getBossId() === "overmind");
+  dir.notifyBossDefeated();
+  dir.update(1.5);
+  assert("stage cleared", dir.isCleared() === true, `mode=${dir.getMode()}`);
+  assert("onStageClear once", cleared === 1);
+  assert("finished", dir.isFinished() === true);
+
+  // DEFAULT_STAGES annotate bosses.
+  assert(
+    "default phase bosses",
+    DEFAULT_STAGES.phases.every((p) => typeof p.boss === "string" && p.boss.length > 0),
+  );
+}
+
 console.log("stages.json on disk");
 {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -317,9 +512,12 @@ console.log("stages.json on disk");
   assert("json phases array", Array.isArray(data.phases) && data.phases.length >= 3);
   const kinds = new Set();
   const hazardKinds = new Set();
+  const bossIds = new Set();
   for (const p of data.phases) {
     assert(`phase ${p.id} has duration`, Number(p.durationSec) > 0);
     assert(`phase ${p.id} has events`, Array.isArray(p.events) && p.events.length > 0);
+    assert(`phase ${p.id} has boss`, typeof p.boss === "string" && p.boss.length > 0);
+    bossIds.add(p.boss);
     for (const ev of p.events) {
       if (ev.spawn === "enemy") kinds.add(ev.kind);
       if (ev.spawn === "hazard") hazardKinds.add(ev.kind);
@@ -329,10 +527,14 @@ console.log("stages.json on disk");
   assert("json includes sine", kinds.has("sine"));
   assert("json includes aimer", kinds.has("aimer"));
   assert("json includes hazard", hazardKinds.size >= 1);
+  assert("json has 3 bosses", bossIds.size >= 3, [...bossIds].join(","));
 
   // Director can run the real JSON script without browser.
+  // Bosses gate phase ends — defeat each to advance.
   let enemyCount = 0;
   let hazardCount = 0;
+  let bossStarts = 0;
+  let stageClears = 0;
   const dir = createStageDirector(data, {
     spawnEnemy() {
       enemyCount += 1;
@@ -340,20 +542,38 @@ console.log("stages.json on disk");
     spawnHazard() {
       hazardCount += 1;
     },
+    onBossStart() {
+      bossStarts += 1;
+    },
+    onStageClear() {
+      stageClears += 1;
+    },
   });
-  // Simulate full run through all phases
-  const totalDur =
-    data.phases.reduce((s, p) => s + Number(p.durationSec), 0) + 1;
+
   const step = 0.25;
-  for (let t = 0; t < totalDur; t += step) {
-    dir.update(step);
+  // Run phase 1 body until boss, then clear; repeat for all phases.
+  for (let phase = 0; phase < data.phases.length; phase++) {
+    const dur = Number(data.phases[phase].durationSec) + 0.5;
+    for (let t = 0; t < dur; t += step) {
+      dir.update(step);
+      if (dir.isBossMode()) break;
+    }
+    assert(
+      `phase ${phase} reaches boss`,
+      dir.isBossMode(),
+      `mode=${dir.getMode()} idx=${dir.getPhaseIndex()}`,
+    );
+    dir.notifyBossDefeated();
+    // Drain outro into next phase or clear.
+    for (let t = 0; t < 2.0; t += step) {
+      dir.update(step);
+    }
   }
+
   assert("json script spawns enemies", enemyCount > 5, `enemies=${enemyCount}`);
   assert("json script spawns hazards", hazardCount > 2, `hazards=${hazardCount}`);
-  assert(
-    "reached last phase during run",
-    dir.getPhaseIndex() === data.phases.length - 1 || dir.getElapsed() > 0,
-  );
+  assert("json bosses started", bossStarts === data.phases.length, `starts=${bossStarts}`);
+  assert("json stage cleared", stageClears === 1 && dir.isCleared());
 }
 
 if (failed > 0) {

@@ -5,6 +5,7 @@
       "label": "Approach",
       "durationSec": 22,
       "scrollSpeed": 90,
+      "boss": "harvester",
       "events": [
         { "at": 0.4, "spawn": "hazard", "kind": "block", "y": 0.38 },
         { "at": 1.5, "spawn": "enemy", "kind": "straight", "y": 0.28 },
@@ -24,6 +25,7 @@
       "label": "Intercept",
       "durationSec": 26,
       "scrollSpeed": 108,
+      "boss": "interceptor",
       "events": [
         { "at": 0.5, "spawn": "enemy", "kind": "sine", "y": 0.25, "amplitude": 52 },
         { "at": 1.5, "spawn": "enemy", "kind": "sine", "y": 0.72, "amplitude": 48 },
@@ -47,6 +49,7 @@
       "label": "Assault",
       "durationSec": 30,
       "scrollSpeed": 125,
+      "boss": "overmind",
       "events": [
         { "at": 0.3, "spawn": "enemy", "kind": "aimer", "y": 0.28 },
         { "at": 1.2, "spawn": "enemy", "kind": "aimer", "y": 0.72 },

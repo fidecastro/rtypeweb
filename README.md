@@ -51,17 +51,17 @@ Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?api
 - **WASD / arrows** — move (clamped to the camera view band)
 - **Space / Enter** — fire (rate-limited) / confirm on game over
 - **Esc / M** — from game over, return to title menu
-- **H** — debug: take 1 damage · **G** — debug: +100 score
+- **H** — debug: take 1 damage · **G** — debug: +100 score · **B** — debug: skip to current phase boss
 - Touch: left half steer, right half fire
 
-Health bar, score, and **phase label** are drawn on the play HUD. A continuous run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage with a short invulnerability window; at 0 HP → game over. Destroying units tagged `enemy` awards score. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+Health bar, score, and **phase label** are drawn on the play HUD. A run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Each phase ends in a **multi-phase boss** (Harvester → Interceptor → Overmind): telegraphed attacks, multi-hit HP, substantial score on defeat, then phase clear / next phase. Beating the final boss **stages clears** the run; boss contact and hazard shots can kill the player (normal invuln window). Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage; at 0 HP → game over. Trash units tagged `enemy` award score on one-shot kills; bosses require multiple hits. If `rtypeweb.player.id` is set (Register view), game over / stage clear `POST`s `/api/score` with `{ playerId, value }`.
 
-Stage / wave data: **`/public/assets/data/stages.json`** (timeline events per phase). The engine falls back to an in-code default script if the file cannot be loaded.
+Stage / wave data: **`/public/assets/data/stages.json`** (timeline events + per-phase `boss` id). The engine falls back to an in-code default script if the file cannot be loaded.
 
 ### Smoke tests
 
 ```bash
-# Game modules (score, damage, enemies, stage director) — no server
+# Game modules (score, damage, enemies, bosses, stage director) — no server
 npm run smoke:game
 
 # API (with server listening)
@@ -176,11 +176,12 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   │   ├── score.js        # Per-run score API
 │   │   ├── enemies.js      # Straight / sine / aimer factories
 │   │   ├── hazards.js      # Block / spike / zone factories
-│   │   └── stageDirector.js # JSON timeline multi-phase director
+│   │   ├── bosses.js       # Phase-end multi-phase bosses
+│   │   └── stageDirector.js # JSON timeline multi-phase director + boss gate
 │   └── scenes/
 │       ├── menu.js         # In-engine menu stub
-│       ├── playing.js      # Combat, waves, HUD, hazards
-│       └── gameover.js     # Final score, submit, retry / title
+│       ├── playing.js      # Combat, waves, bosses, HUD, hazards
+│       └── gameover.js     # Final score / stage clear, submit, retry / title
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
@@ -216,7 +217,7 @@ Runtime asset URLs (when serving from repo root) use paths like `/public/assets/
 | Title / home | `#/` | Loads `GET /api/leaderboard`; empty or top 10; menu stays usable on error |
 | Register | `#/register` | `POST /api/register` → `localStorage` `rtypeweb.player` (`id`, `nickname`, …) |
 | High scores | `#/scores` | Full leaderboard + refresh |
-| Play | `#/play` | Boots combat engine into `#game`; death → game over (+ optional score submit) |
+| Play | `#/play` | Boots combat engine into `#game`; death or stage clear → result screen (+ optional score submit) |
 
 ### Scroll convention
 
