@@ -1,15 +1,21 @@
 /**
  * Playing scene: auto-scrolling world, player ship with weapons/HP,
- * hazards, score, HUD; death → game-over with score payload.
+ * multi-phase enemy waves, hazards, score, HUD; death → game-over.
  */
 
 import { createCamera } from '../engine/camera.js';
-import { createEntity, createEntityList } from '../engine/entity.js';
+import { createEntityList } from '../engine/entity.js';
 import { aabbOverlap } from '../engine/collision.js';
 import { createPlayer, SCORE_ENEMY_KILL } from '../game/player.js';
 import { createRunScore } from '../game/score.js';
+import { spawnEnemy } from '../game/enemies.js';
+import { spawnHazard } from '../game/hazards.js';
+import {
+  createStageDirector,
+  DEFAULT_STAGES,
+  loadStages,
+} from '../game/stageDirector.js';
 
-const ENEMY_SPAWN_INTERVAL = 1.6;
 const DEATH_FREEZE_SEC = 0.45;
 
 /**
@@ -45,15 +51,18 @@ export function createPlayingScene({
   const score = createRunScore();
   /** @type {ReturnType<typeof createPlayer> | null} */
   let player = null;
-  /** @type {object | null} */
-  let obstacle = null;
-  let spawnTimer = 0;
+  /** @type {ReturnType<typeof createStageDirector> | null} */
+  let director = null;
+  /** @type {string} */
+  let phaseLabel = '';
   let frozen = false;
   let flashT = 0;
   let deathTimer = 0;
   let pendingGameOver = false;
+  /** Bump so late stage JSON loads do not rebind an exited / restarted run. */
+  let runToken = 0;
 
-  // Debug keys (dev verification when enemies not yet awarding score).
+  // Debug keys (dev verification).
   /** @type {((e: KeyboardEvent) => void) | null} */
   let onDebugKey = null;
 
@@ -67,36 +76,54 @@ export function createPlayingScene({
     entities.add(player);
   }
 
-  function spawnObstacle() {
-    obstacle = createEntity({
-      type: 'obstacle',
-      tags: ['hazard'],
-      x: camera.x + viewWidth * 0.72,
-      y: viewHeight * 0.42,
-      w: 48,
-      h: 80,
-      color: '#f87171',
-      despawnWhenOffscreen: false,
-      hit: false,
+  /**
+   * @param {object} ev stage event
+   */
+  function handleSpawnEnemy(ev) {
+    const enemy = spawnEnemy(ev.kind || 'straight', {
+      camera,
+      viewWidth,
+      viewHeight,
+      y: ev.y,
+      amplitude: ev.amplitude,
+      frequency: ev.frequency,
+      vx: ev.vx,
+      trackSpeed: ev.trackSpeed,
+      fireInterval: ev.fireInterval,
     });
-    entities.add(obstacle);
+    entities.add(enemy);
   }
 
-  function spawnEnemy() {
-    const y = 40 + Math.random() * (viewHeight - 80);
-    entities.add(
-      createEntity({
-        type: 'enemy',
-        tags: ['hazard', 'enemy'],
-        x: camera.x + viewWidth + 20,
-        y,
-        w: 28,
-        h: 28,
-        vx: -40,
-        color: '#c084fc',
-        despawnWhenOffscreen: true,
-      }),
-    );
+  /**
+   * @param {object} ev stage event
+   */
+  function handleSpawnHazard(ev) {
+    const hazard = spawnHazard(ev.kind || 'block', {
+      camera,
+      viewWidth,
+      viewHeight,
+      y: ev.y,
+      w: ev.w,
+      h: ev.h,
+      destructible: !!ev.destructible,
+    });
+    entities.add(hazard);
+  }
+
+  function makeDirector(stagesData) {
+    return createStageDirector(stagesData, {
+      spawnEnemy: handleSpawnEnemy,
+      spawnHazard: handleSpawnHazard,
+      onPhaseChange(phase) {
+        phaseLabel = phase?.label || phase?.id || '';
+        if (setStatus && phaseLabel) {
+          setStatus(`Phase: ${phaseLabel}`);
+        }
+      },
+      setScrollSpeed(speed) {
+        camera.scrollSpeed = speed;
+      },
+    });
   }
 
   function finishRun() {
@@ -123,7 +150,7 @@ export function createPlayingScene({
       if (!proj.alive) continue;
       for (const e of entities.all()) {
         if (!e.alive || e === proj) continue;
-        // Killable targets: streaming enemies only (obstacle is solid hazard).
+        // Killable targets: tag `enemy` (units + optional destructible hazards).
         if (!e.tags?.has('enemy')) continue;
         if (aabbOverlap(proj, e)) {
           e.alive = false;
@@ -144,7 +171,7 @@ export function createPlayingScene({
         const applied = player.takeDamage(1);
         if (applied) {
           e.hit = true;
-          if (e.type === 'obstacle') {
+          if (e.type === 'obstacle' || e.kind === 'block' || e.kind === 'spike') {
             e.color = '#fbbf24';
           }
           if (player.isDead || player.hp <= 0) {
@@ -208,6 +235,23 @@ export function createPlayingScene({
     ctx.textAlign = 'right';
     ctx.fillText(`Score ${score.get()}`, viewWidth - 12, 22);
 
+    // Phase label (center-top); flash brighter while banner is active.
+    if (phaseLabel) {
+      const banner = director?.getBannerT?.() ?? 0;
+      const bright = banner > 0;
+      ctx.textAlign = 'center';
+      ctx.font = bright
+        ? 'bold 16px system-ui, sans-serif'
+        : '13px system-ui, sans-serif';
+      ctx.fillStyle = bright
+        ? 'rgba(250, 204, 21, 0.95)'
+        : 'rgba(232, 238, 245, 0.75)';
+      const phaseNum = (director?.getPhaseIndex?.() ?? 0) + 1;
+      const phaseCount = director?.getPhaseCount?.() ?? 0;
+      const suffix = phaseCount > 0 ? ` (${phaseNum}/${phaseCount})` : '';
+      ctx.fillText(`${phaseLabel}${suffix}`, viewWidth / 2, 22);
+    }
+
     ctx.textAlign = 'left';
     ctx.font = '12px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(232, 238, 245, 0.7)';
@@ -224,17 +268,27 @@ export function createPlayingScene({
       entities.clear();
       camera.setX(0);
       camera.setY(0);
-      spawnTimer = 0;
+      camera.scrollSpeed = 90;
       frozen = false;
       flashT = 0;
       deathTimer = 0;
       pendingGameOver = false;
+      phaseLabel = '';
       score.reset();
       if (runState) runState.lastScore = 0;
       spawnPlayer();
-      spawnObstacle();
 
-      // Debug: H = take 1 damage, G = +100 score (verification without enemies).
+      const token = ++runToken;
+      director = makeDirector(DEFAULT_STAGES);
+
+      // Prefer JSON stages when available; only rebind if still early in this run.
+      loadStages().then((stages) => {
+        if (token !== runToken) return;
+        if (!director || director.getElapsed() > 1.0) return;
+        director = makeDirector(stages);
+      });
+
+      // Debug: H = take 1 damage, G = +100 score.
       onDebugKey = (e) => {
         if (e.repeat || frozen || pendingGameOver) return;
         if (e.code === 'KeyH' || e.key === 'h' || e.key === 'H') {
@@ -252,13 +306,15 @@ export function createPlayingScene({
     },
 
     exit() {
+      runToken += 1;
       if (onDebugKey) {
         window.removeEventListener('keydown', onDebugKey);
         onDebugKey = null;
       }
       entities.clear();
       player = null;
-      obstacle = null;
+      director = null;
+      phaseLabel = '';
     },
 
     /**
@@ -293,13 +349,12 @@ export function createPlayingScene({
         player.tryFire(entities);
       }
 
-      entities.updateAll(dt, { camera, input });
-
-      spawnTimer += dt;
-      if (spawnTimer >= ENEMY_SPAWN_INTERVAL) {
-        spawnTimer = 0;
-        spawnEnemy();
+      // Stage timeline (spawns enemies/hazards from JSON / default script).
+      if (director) {
+        director.update(dt, { camera, player, entities, viewWidth, viewHeight });
       }
+
+      entities.updateAll(dt, { camera, input, player, entities });
 
       resolveProjectileHits();
       resolveHazardDamage();
