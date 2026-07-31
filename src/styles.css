@@ -1,0 +1,366 @@
+/* Retro-inspired menu shell — legible dark UI, no sprite art required */
+
+:root {
+  color-scheme: dark;
+  --bg: #070b10;
+  --bg-panel: #0e1520;
+  --border: #2a4a6a;
+  --border-bright: #4af;
+  --text: #e8eef5;
+  --muted: #8aa0b8;
+  --accent: #3cf0ff;
+  --accent-dim: #1a8a99;
+  --warn: #ffb84a;
+  --error: #ff6b7a;
+  --ok: #5dff9a;
+  --rank: #ffd24a;
+  --font: "Courier New", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font);
+  background:
+    radial-gradient(ellipse at 50% 0%, #122033 0%, transparent 55%),
+    var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.app {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2rem;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.app-header {
+  text-align: center;
+}
+
+.logo {
+  margin: 0;
+  font-size: clamp(1.6rem, 5vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  text-shadow: 0 0 12px rgba(60, 240, 255, 0.35);
+}
+
+.logo-sub {
+  color: var(--text);
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+
+.player-badge {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ok);
+}
+
+.player-badge[hidden] {
+  display: none;
+}
+
+.main-nav {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+}
+
+.nav-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.65rem 0.35rem;
+  cursor: pointer;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 2px solid var(--border);
+  transition: border-color 0.12s, color 0.12s, box-shadow 0.12s;
+}
+
+.nav-btn:hover,
+.nav-btn:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent-dim);
+}
+
+.nav-btn[aria-current="page"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #122030;
+  box-shadow: inset 0 0 12px rgba(60, 240, 255, 0.12);
+}
+
+.views {
+  flex: 1;
+}
+
+.view[hidden] {
+  display: none !important;
+}
+
+.view.is-active {
+  display: block;
+  animation: fade-in 0.18s ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 2px solid var(--border);
+  padding: 1.1rem 1rem 1.25rem;
+  box-shadow: 0 0 0 1px rgba(42, 74, 106, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.panel-title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+
+.panel-desc {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.hint {
+  margin: 0.85rem 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Leaderboard */
+.leaderboard {
+  min-height: 6rem;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.leaderboard-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.leaderboard-table td {
+  padding: 0.45rem 0.4rem;
+  border-bottom: 1px solid rgba(42, 74, 106, 0.45);
+}
+
+.leaderboard-table tr:last-child td {
+  border-bottom: none;
+}
+
+.leaderboard-table .col-rank {
+  width: 2.5rem;
+  color: var(--rank);
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard-table .col-score {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.state-msg {
+  margin: 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.state-msg.is-error {
+  color: var(--error);
+}
+
+.state-msg.is-empty {
+  color: var(--warn);
+}
+
+/* Register form */
+.register-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.field-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field input {
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--text);
+  background: #080c12;
+  border: 2px solid var(--border);
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim);
+}
+
+.field input::placeholder {
+  color: #4a6078;
+}
+
+.btn-primary,
+.btn-secondary {
+  font: inherit;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  border: 2px solid var(--border-bright);
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
+}
+
+.btn-primary {
+  color: #041018;
+  background: var(--accent);
+  font-weight: 700;
+}
+
+.btn-primary:hover:not(:disabled),
+.btn-primary:focus-visible:not(:disabled) {
+  background: #7af7ff;
+  outline: none;
+}
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  margin-top: 0.85rem;
+  color: var(--accent);
+  background: transparent;
+}
+
+.btn-secondary:hover,
+.btn-secondary:focus-visible {
+  background: rgba(60, 240, 255, 0.08);
+  outline: none;
+}
+
+.form-status {
+  margin: 0.85rem 0 0;
+  min-height: 1.25rem;
+  font-size: 0.85rem;
+}
+
+.form-status.is-ok {
+  color: var(--ok);
+}
+
+.form-status.is-error {
+  color: var(--error);
+}
+
+/* Game mount */
+.game-panel {
+  min-height: 14rem;
+}
+
+.game-status {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.game-root {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 2px solid var(--border);
+  background: #060a0f;
+  margin-top: 0.25rem;
+  padding: 0.35rem;
+  overflow: hidden;
+}
+
+.game-root #game {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #243044;
+  border-radius: 2px;
+  background: #0b1220;
+  touch-action: none;
+  image-rendering: pixelated;
+}
+
+.game-controls-hint {
+  margin-top: 0.65rem;
+}
+
+.app-footer {
+  text-align: center;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: #4a6078;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+@media (max-width: 420px) {
+  .main-nav {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

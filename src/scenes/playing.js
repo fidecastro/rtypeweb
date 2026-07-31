@@ -279,6 +279,13 @@ export function createPlayingScene({
         return;
       }
 
+      // Advance invuln flash clock while alive (not only during death freeze).
+      if (player && !player.isDead && player._time < player.invulnerableUntil) {
+        flashT += dt;
+      } else if (!pendingGameOver) {
+        flashT = 0;
+      }
+
       camera.update(dt);
 
       if (player) {
@@ -315,14 +322,18 @@ export function createPlayingScene({
       drawGrid();
       entities.renderAll(ctx, camera);
 
-      // Invuln flash: blink player-ish overlay when recently hit.
+      // Invuln flash: dim ship briefly while invulnerable (color also yellow).
       if (
         player &&
+        player.alive &&
         !player.isDead &&
         player._time < player.invulnerableUntil &&
         Math.floor(flashT * 12) % 2 === 0
       ) {
-        // mild vignette not needed; entity color already yellow
+        const sx = player.x - camera.x;
+        const sy = player.y - camera.y;
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.35)';
+        ctx.fillRect(sx - 2, sy - 2, player.w + 4, player.h + 4);
       }
 
       if (pendingGameOver && Math.floor(flashT * 8) % 2 === 0) {

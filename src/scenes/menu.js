@@ -1,8 +1,9 @@
 /**
- * Menu: start game + minimal register (DOM form) / show stored identity.
+ * In-engine menu stub (optional). Registration lives in the shell Register view.
+ * Press Space/Enter to start a run when this scene is active.
  */
 
-import { loadStoredPlayer, registerPlayer } from '../game/apiClient.js';
+import { loadPlayer } from '../player.js';
 
 /**
  * @param {object} deps
@@ -23,91 +24,25 @@ export function createMenuScene({
   viewWidth,
   viewHeight,
 }) {
-  const form = document.getElementById('register-form');
-  const nickInput = document.getElementById('reg-nickname');
-  const emailInput = document.getElementById('reg-email');
-  const regStatus = document.getElementById('reg-status');
-  const regSubmit = document.getElementById('reg-submit');
-  const identityEl = document.getElementById('player-identity');
-
-  /** @type {((e: Event) => void) | null} */
-  let onSubmit = null;
-
-  function refreshIdentity() {
-    const player = loadStoredPlayer();
-    if (identityEl) {
-      if (player) {
-        identityEl.textContent = `Playing as ${player.nickname}`;
-        identityEl.hidden = false;
-      } else {
-        identityEl.textContent = 'Not registered — scores will not be submitted';
-        identityEl.hidden = false;
-      }
-    }
-    return player;
-  }
-
-  function showForm(visible) {
-    if (form) form.hidden = !visible;
-  }
-
   return {
     enter() {
-      refreshIdentity();
-      showForm(true);
-      if (regStatus) regStatus.textContent = '';
-      if (setStatus) setStatus('Menu — register optional, then Space/Enter to start');
-
-      onSubmit = async (e) => {
-        e.preventDefault();
-        if (!(nickInput instanceof HTMLInputElement) || !(emailInput instanceof HTMLInputElement)) {
-          return;
-        }
-        const nickname = nickInput.value;
-        const email = emailInput.value;
-        if (regStatus) regStatus.textContent = 'Registering…';
-        if (regSubmit instanceof HTMLButtonElement) regSubmit.disabled = true;
-        const result = await registerPlayer({ nickname, email });
-        if (regSubmit instanceof HTMLButtonElement) regSubmit.disabled = false;
-        if (result.ok) {
-          if (regStatus) {
-            regStatus.textContent = result.created
-              ? `Registered as ${result.player.nickname}`
-              : `Welcome back, ${result.player.nickname}`;
-          }
-          refreshIdentity();
-        } else {
-          if (regStatus) regStatus.textContent = result.error || 'Register failed';
-        }
-      };
-
-      if (form) {
-        form.addEventListener('submit', onSubmit);
+      const player = loadPlayer();
+      if (setStatus) {
+        setStatus(
+          player
+            ? `Menu — playing as ${player.nickname}`
+            : 'Menu — register in shell for score submit',
+        );
       }
     },
 
-    exit() {
-      showForm(false);
-      if (form && onSubmit) {
-        form.removeEventListener('submit', onSubmit);
-      }
-      onSubmit = null;
-    },
+    exit() {},
 
     /**
      * @param {number} _dt
      */
     update(_dt) {
-      // fire action includes Space and Enter (see input.js).
-      // Ignore fire while focus is in a form field so typing Space works.
-      const active = document.activeElement;
-      const typing =
-        active instanceof HTMLInputElement ||
-        active instanceof HTMLTextAreaElement ||
-        active instanceof HTMLButtonElement ||
-        (active && active.closest && active.closest('#register-form'));
-
-      if (!typing && input.wasPressed('fire')) {
+      if (input.wasPressed('fire')) {
         onStart();
       }
       input.endFrame();
@@ -117,7 +52,7 @@ export function createMenuScene({
      * @param {number} _alpha
      */
     render(_alpha) {
-      const player = loadStoredPlayer();
+      const player = loadPlayer();
 
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -151,7 +86,11 @@ export function createMenuScene({
       } else {
         ctx.fillStyle = 'rgba(232, 238, 245, 0.45)';
         ctx.font = '13px system-ui, sans-serif';
-        ctx.fillText('Register below to submit scores on game over', viewWidth / 2, viewHeight / 2 + 44);
+        ctx.fillText(
+          'Use Register in the menu to submit scores on game over',
+          viewWidth / 2,
+          viewHeight / 2 + 44,
+        );
       }
 
       ctx.restore();

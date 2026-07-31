@@ -1,9 +1,10 @@
 /**
  * Game-over: final score, optional POST /api/score when registered,
- * Space/Enter retry, Esc/M → menu.
+ * Space/Enter retry, Esc/M → shell title menu.
  */
 
-import { loadStoredPlayer, submitScore } from '../game/apiClient.js';
+import { submitScore } from '../api.js';
+import { loadPlayer } from '../player.js';
 
 /**
  * @param {object} deps
@@ -38,9 +39,9 @@ export function createGameOverScene({
     enter() {
       submittedThisEnter = false;
       const finalScore = typeof getLastScore === 'function' ? getLastScore() : 0;
-      const player = loadStoredPlayer();
+      const player = loadPlayer();
 
-      if (!player?.playerId) {
+      if (!player?.id) {
         submitStatus = 'Not registered — score not submitted';
         if (setStatus) {
           setStatus(`Game over — score ${finalScore} (not registered)`);
@@ -50,22 +51,25 @@ export function createGameOverScene({
         if (setStatus) setStatus(`Game over — score ${finalScore}`);
         if (!submittedThisEnter) {
           submittedThisEnter = true;
-          submitScore({ playerId: player.playerId, value: finalScore }).then(
-            (result) => {
-              if (result.ok) {
-                submitStatus = `Score saved as ${player.nickname}`;
-              } else {
-                submitStatus = `Submit failed: ${result.error}`;
-              }
-            },
-          );
+          // API contract: playerId; storage shape: player.id (DEV-148).
+          submitScore({ playerId: player.id, value: finalScore }).then((result) => {
+            if (result.ok) {
+              submitStatus = `Score saved as ${player.nickname}`;
+            } else {
+              const err =
+                (result.data && result.data.error) ||
+                result.status ||
+                'unknown error';
+              submitStatus = `Submit failed: ${err}`;
+            }
+          });
         }
       }
 
       onKey = (e) => {
         if (e.code === 'Escape' || e.code === 'KeyM' || e.key === 'm' || e.key === 'M') {
           e.preventDefault();
-          onMenu();
+          if (typeof onMenu === 'function') onMenu();
         }
       };
       window.addEventListener('keydown', onKey);
@@ -120,7 +124,7 @@ export function createGameOverScene({
       ctx.fillText('Space / Enter — play again', viewWidth / 2, viewHeight / 2 + 64);
       ctx.font = '14px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(232, 238, 245, 0.6)';
-      ctx.fillText('Esc / M — menu', viewWidth / 2, viewHeight / 2 + 90);
+      ctx.fillText('Esc / M — title menu', viewWidth / 2, viewHeight / 2 + 90);
 
       ctx.restore();
     },

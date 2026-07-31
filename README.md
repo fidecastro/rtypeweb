@@ -1,6 +1,6 @@
 # R-Type Web
 
-Vanilla JavaScript shell for an R-Type-style browser game. Static site at the repo root, deployable on Vercel, with a modular side-scrolling engine under `src/engine/` and serverless API routes for player registration and score persistence.
+Vanilla JavaScript shell for an R-Type-style browser game. Static site at the repo root, deployable on Vercel, with serverless API routes for player registration and score persistence.
 
 ## Requirements
 
@@ -13,36 +13,57 @@ Vanilla JavaScript shell for an R-Type-style browser game. Static site at the re
 npm install
 ```
 
-## Local run (static shell)
+## Local run (menu UI + API)
+
+Recommended same-origin setup (static menu + API on one port):
+
+```bash
+npm run api
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` with combat: clamped ship, primary fire, health gauge, score HUD, hazards, and game-over score submit when registered.
+
+### Static only
 
 ```bash
 npm start
 # or: npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Serves files only (`serve`) — **no** `api/` handlers. Leaderboard/register will show an error state; the menu shell and Play engine still work.
 
-**Expected result:** canvas boots into **Menu**. Register (optional) via the form under the canvas, then **Space / Enter** to play. The world auto-scrolls right (R-Type rightward advance). **WASD / arrows** move the green ship; **Space** fires cyan projectiles (rate-limited). Health gauge and score are on the HUD. Hazards (red obstacle, purple enemies) deal damage with a short invulnerability window; at 0 HP → **Game Over** with final score. **Space** retries; **Esc / M** returns to menu. Debug keys while playing: **H** = take 1 damage, **G** = +100 score.
+### Split ports (loopback only)
 
-### Scroll convention
+If the API runs on another **localhost** origin, set once:
 
-Player faces / advances **+X (right)**. Camera `x` increases as the playfield streams past; see the table in `src/engine/camera.js`.
-
-### Full local play (game + API)
-
-`npm start` serves static files only (`serve`) and does **not** run `api/` handlers. For register + score submit from the browser, use the local API runner (now also serves static):
-
-```bash
-npm run api
-# open http://localhost:3000
+```js
+localStorage.setItem('rtypeweb.apiBase', 'http://localhost:3000')
 ```
 
-Or `npm run dev:vercel` if you prefer the Vercel CLI.
+or open `http://localhost:PORT/?apiBase=http://localhost:3000`.
 
-### Game module smoke
+Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?apiBase=` values are ignored and not stored.
+
+### Play controls
+
+- **WASD / arrows** — move (clamped to the camera view band)
+- **Space / Enter** — fire (rate-limited) / confirm on game over
+- **Esc / M** — from game over, return to title menu
+- **H** — debug: take 1 damage · **G** — debug: +100 score
+- Touch: left half steer, right half fire
+
+Health bar and score are drawn on the play HUD. Hazards deal damage with a short invulnerability window; at 0 HP → game over. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+
+### Smoke tests
 
 ```bash
+# Game modules (score, damage, fire cooldown) — no server
 npm run smoke:game
+
+# API (with server listening)
+API_BASE=http://localhost:3000 npm run smoke
 ```
 
 ## Player / score API
@@ -97,12 +118,7 @@ Error shape:
 
 ### Local API server
 
-Without Vercel login:
-
-```bash
-npm run api
-# listens on PORT (default 3000)
-```
+Without Vercel login, `npm run api` runs `scripts/local-api.mjs`: **API routes plus allowlisted static files** (`index.html`, `/src/*`, `/public/*`) on `PORT` (default 3000). Paths outside that allowlist (e.g. `data/*.db`, `api/` sources, `node_modules`) return **404**.
 
 Or with the Vercel CLI (matches production routing more closely):
 
@@ -132,7 +148,7 @@ curl -sS "$API_BASE/api/leaderboard"
 # → { "scores": [ { "rank":1, "nickname":"Ace", "value":5000, "createdAt":"…" } ] }
 ```
 
-### Smoke tests
+### Smoke tests (API)
 
 With the API listening:
 
@@ -146,24 +162,20 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 
 ```
 .
-├── index.html              # Static entry + canvas + register form
+├── index.html              # Title screen / main menu shell + canvas
 ├── src/
-│   ├── main.js             # Boot: canvas, Input, Game, Loop, runState
-│   ├── engine/
-│   │   ├── loop.js         # Fixed-timestep rAF loop
-│   │   ├── input.js        # Keyboard + simple touch
-│   │   ├── camera.js       # World scroll / transforms
-│   │   ├── entity.js       # Entity + EntityList
-│   │   ├── collision.js    # AABB helpers
-│   │   └── game.js         # Scene state machine
+│   ├── main.js             # Views: home, register, scores, play (engine + runState)
+│   ├── api.js              # register / leaderboard / submitScore + loopback apiBase
+│   ├── player.js           # localStorage identity { id, nickname, email }
+│   ├── styles.css          # Retro menu styling
+│   ├── engine/             # Fixed-timestep loop, input, camera, entities
 │   ├── game/
 │   │   ├── player.js       # Ship movement, HP, fire cooldown
-│   │   ├── score.js        # Per-run score API
-│   │   └── apiClient.js    # register / submitScore + localStorage
+│   │   └── score.js        # Per-run score API
 │   └── scenes/
-│       ├── menu.js         # Start + optional register
-│       ├── playing.js      # Play loop: combat, HUD, hazards
-│       └── gameover.js     # Final score, submit, menu / retry
+│       ├── menu.js         # In-engine menu stub
+│       ├── playing.js      # Combat, HUD, hazards
+│       └── gameover.js     # Final score, submit, retry / title
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
@@ -178,10 +190,10 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── validate.js
 │   └── http.js
 ├── scripts/
-│   ├── local-api.mjs       # Local HTTP: api/* + static files
+│   ├── local-api.mjs       # Local static (allowlisted) + api/* server
 │   ├── smoke-api.mjs       # HTTP smoke verification
 │   └── smoke-game.mjs      # Client game-module smoke
-├── data/                   # Local SQLite DB (gitignored)
+├── data/                   # Local SQLite DB (gitignored; not served statically)
 ├── vercel.json
 ├── package.json
 ├── .env.example
@@ -190,6 +202,27 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 ```
 
 Runtime asset URLs (when serving from repo root) use paths like `/public/assets/sprites/...`.
+
+## Menu UI notes
+
+| View | Route hash | Behavior |
+|------|------------|----------|
+| Title / home | `#/` | Loads `GET /api/leaderboard`; empty or top 10; menu stays usable on error |
+| Register | `#/register` | `POST /api/register` → `localStorage` `rtypeweb.player` (`id`, `nickname`, …) |
+| High scores | `#/scores` | Full leaderboard + refresh |
+| Play | `#/play` | Boots combat engine into `#game`; death → game over (+ optional score submit) |
+
+### Scroll convention
+
+Player faces / advances **+X (right)**. Camera `x` increases as the playfield streams past; see `src/engine/camera.js`.
+
+### Scoring / damage APIs for other systems
+
+- `player.takeDamage(n)` / `player.heal(n)` on the ship controller (`src/game/player.js`)
+- `createRunScore()` → `add(points)`, `get()`, `reset()` (`src/game/score.js`)
+- Identity: `loadPlayer()` → use `player.id` as API `playerId` when submitting
+
+Auth (passwords/OAuth) and full enemy roster / VFX packs are out of scope for this slice.
 
 ## Deploy to Vercel
 
@@ -205,7 +238,6 @@ Without `LIBSQL_URL`, handlers fall back to a local file path. That is fine for 
 ## Notes
 
 - No bundler or SPA framework is required.
-- Game logic lives under `src/` (engine + scenes).
+- Game logic lives under `src/`.
 - Public media and data live under `public/assets/`.
-- Auth (passwords/OAuth) is out of scope; the menu stores `{ playerId, nickname }` in `localStorage` (`rtypeweb.player`) after register so game over can `POST /api/score`.
-- Enemy systems can call `player.takeDamage(n)` and `score.add(points)` without importing scenes.
+- Registration stores `{ id, nickname, email }` in `localStorage` (`rtypeweb.player`); game over submits with `playerId: player.id`.

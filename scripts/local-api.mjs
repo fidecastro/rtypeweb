@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Thin local Node runner for api/* handlers (no Vercel login required).
- * Also serves static files from the repo root so the game client can hit
- * same-origin /api/* during local play (register + score submit).
+ * Local Node runner for api/* handlers + static files (no Vercel login).
  * Usage: node scripts/local-api.mjs
- * Listens on PORT (default 3000).
+ * Listens on PORT (default 3000). Serves only index.html, /src/*, /public/*
+ * so the menu UI and API share the same origin for browser walkthroughs.
+ * Paths outside that allowlist (e.g. /data/*.db, /api source, node_modules)
+ * return 404.
  */
 import http from "node:http";
 import fs from "node:fs";
@@ -16,7 +17,8 @@ import score from "../api/score.js";
 import leaderboard from "../api/leaderboard.js";
 
 const PORT = Number(process.env.PORT || 3000);
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, "..");
 
 const routes = {
   "POST /api/register": register,
@@ -30,33 +32,74 @@ const MIME = {
   ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
-  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
   ".ico": "image/x-icon",
-  ".wav": "audio/wav",
-  ".mp3": "audio/mpeg",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
-  ".map": "application/json; charset=utf-8",
+  ".map": "application/json",
   ".txt": "text/plain; charset=utf-8",
-  ".md": "text/markdown; charset=utf-8",
 };
 
 /**
+ * Whether a path relative to ROOT is allowed as a static asset.
+ * Allowlist: index.html at root, anything under src/, anything under public/.
+ * @param {string} relFromRoot posix-ish relative path (no leading slash)
+ */
+function isAllowedStatic(relFromRoot) {
+  if (!relFromRoot || relFromRoot === ".") return false;
+  // normalize separators for windows-safety; repo is linux in CI
+  const rel = relFromRoot.split(path.sep).join("/");
+  if (rel === "index.html") return true;
+  if (rel.startsWith("src/") && rel !== "src/") return true;
+  if (rel.startsWith("public/") && rel !== "public/") return true;
+  return false;
+}
+
+/**
  * @param {string} urlPath
- * @returns {string | null} absolute file path or null if unsafe / missing
+ * @returns {string | null} absolute file path or null if unsafe / missing / denied
  */
 function resolveStatic(urlPath) {
-  let rel = decodeURIComponent(urlPath.split("?")[0]);
-  if (rel === "/" || rel === "") rel = "/index.html";
-  // Prevent path traversal
+  let decoded;
+  try {
+    decoded = decodeURIComponent(urlPath);
+  } catch {
+    return null;
+  }
+  let rel = decoded.split("?")[0];
+  if (rel.includes("\0")) return null;
+  // strip leading slashes so path.join keeps ROOT as base (POSIX)
+  rel = rel.replace(/^\/+/, "");
+  if (!rel) rel = "index.html";
+
   const abs = path.normalize(path.join(ROOT, rel));
-  if (!abs.startsWith(ROOT + path.sep) && abs !== ROOT) return null;
-  if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) return null;
-  return abs;
+  const relFromRoot = path.relative(ROOT, abs);
+  if (relFromRoot.startsWith("..") || path.isAbsolute(relFromRoot)) return null;
+
+  try {
+    const st = fs.statSync(abs);
+    if (st.isDirectory()) {
+      const index = path.join(abs, "index.html");
+      if (fs.existsSync(index) && fs.statSync(index).isFile()) {
+        const indexRel = path.relative(ROOT, index);
+        if (!isAllowedStatic(indexRel)) return null;
+        return index;
+      }
+      return null;
+    }
+    if (st.isFile()) {
+      if (!isAllowedStatic(relFromRoot)) return null;
+      return abs;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**
@@ -73,11 +116,10 @@ function sendFile(res, filePath) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  const pathOnly = url.pathname.replace(/\/$/, "") || "/";
-  const key = `${(req.method || "GET").toUpperCase()} ${pathOnly === "/" ? "/" : pathOnly}`;
-  // Normalize: routes use no trailing slash; pathOnly already stripped
-  const routeKey = `${(req.method || "GET").toUpperCase()} ${pathOnly}`;
-  const handler = routes[routeKey] || routes[key];
+  const pathname = url.pathname.replace(/\/$/, "") || "/";
+  const method = (req.method || "GET").toUpperCase();
+  const key = `${method} ${pathname}`;
+  const handler = routes[key];
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -103,20 +145,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Known API paths with wrong method
+  // method not allowed for known API paths
   const knownPaths = ["/api/register", "/api/score", "/api/leaderboard"];
-  if (knownPaths.includes(pathOnly)) {
+  if (knownPaths.includes(pathname)) {
     res.statusCode = 405;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify({ error: "Method not allowed", code: "METHOD_NOT_ALLOWED" }));
     return;
   }
 
-  // Static files (GET/HEAD only)
-  if (req.method === "GET" || req.method === "HEAD") {
+  // Static files for menu UI (GET/HEAD only) — allowlisted roots only
+  if (method === "GET" || method === "HEAD") {
     const filePath = resolveStatic(url.pathname);
     if (filePath) {
-      if (req.method === "HEAD") {
+      if (method === "HEAD") {
         const ext = path.extname(filePath).toLowerCase();
         res.statusCode = 200;
         res.setHeader("Content-Type", MIME[ext] || "application/octet-stream");
@@ -138,8 +180,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Local server listening on http://localhost:${PORT}`);
-  console.log(`  Static: index.html, src/, public/`);
+  console.log(`Local app + API listening on http://localhost:${PORT}`);
+  console.log(`  Static (allowlist): index.html, /src/*, /public/*`);
   console.log(`  POST /api/register`);
   console.log(`  POST /api/score`);
   console.log(`  GET  /api/leaderboard`);
