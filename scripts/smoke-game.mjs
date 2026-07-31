@@ -63,6 +63,7 @@ import {
   MUTE_STORAGE_KEY,
   __setAudioForTests,
 } from "../src/audio.js";
+import { createGameOverScene } from "../src/scenes/gameover.js";
 
 let failed = 0;
 
@@ -1019,6 +1020,186 @@ console.log("audio manager (graceful degrade in Node)");
   shared.playSfx("shot");
   __setAudioForTests(null);
 }
+
+console.log("game-over score submit seams");
+await (async () => {
+  // Minimal canvas / input / window stubs for Node (no browser).
+  if (typeof globalThis.window === "undefined") {
+    globalThis.window = /** @type {any} */ (globalThis);
+  }
+  const win = /** @type {any} */ (globalThis.window);
+  const origAdd = typeof win.addEventListener === "function" ? win.addEventListener.bind(win) : null;
+  const origRemove =
+    typeof win.removeEventListener === "function" ? win.removeEventListener.bind(win) : null;
+  win.addEventListener = () => {};
+  win.removeEventListener = () => {};
+
+  const canvas = { width: 960, height: 540 };
+  const ctx = {
+    save() {},
+    restore() {},
+    setTransform() {},
+    scale() {},
+    fillRect() {},
+    fillText() {},
+    fillStyle: "",
+    font: "",
+    textAlign: "",
+  };
+  const input = {
+    wasPressed() {
+      return false;
+    },
+    endFrame() {},
+  };
+
+  // Unregistered: no submit, clear status, menu leaves immediately.
+  {
+    let menuCalls = 0;
+    let submitCalls = 0;
+    const scene = createGameOverScene({
+      canvas: /** @type {any} */ (canvas),
+      ctx: /** @type {any} */ (ctx),
+      input,
+      onRestart() {},
+      onMenu() {
+        menuCalls += 1;
+      },
+      getLastScore: () => 1200,
+      getCleared: () => false,
+      viewWidth: 960,
+      viewHeight: 540,
+      loadPlayer: () => null,
+      submitScore: async () => {
+        submitCalls += 1;
+        return { ok: true, status: 201, data: {} };
+      },
+    });
+    scene.enter();
+    assert(
+      "unregistered status",
+      scene._test.getSubmitStatus() === "Not registered — score not submitted",
+    );
+    scene._test.leaveToMenu();
+    assert("unregistered menu immediate", menuCalls === 1);
+    assert("unregistered no submit", submitCalls === 0);
+    scene.exit();
+  }
+
+  // Registered success + await submit before menu (race fix).
+  {
+    let menuCalls = 0;
+    /** @type {() => void} */
+    let resolveSubmit = () => {};
+    const gate = new Promise((r) => {
+      resolveSubmit = r;
+    });
+    const scene = createGameOverScene({
+      canvas: /** @type {any} */ (canvas),
+      ctx: /** @type {any} */ (ctx),
+      input,
+      onRestart() {},
+      onMenu() {
+        menuCalls += 1;
+      },
+      getLastScore: () => 9999,
+      getCleared: () => true,
+      viewWidth: 960,
+      viewHeight: 540,
+      loadPlayer: () => ({ id: "player-1", nickname: "Ace" }),
+      submitScore: async ({ playerId, value }) => {
+        assert("submit playerId", playerId === "player-1");
+        assert("submit value", value === 9999);
+        await gate;
+        return { ok: true, status: 201, data: { id: "s1" } };
+      },
+    });
+    scene.enter();
+    assert(
+      "submitting status",
+      scene._test.getSubmitStatus() === "Submitting score…",
+    );
+    const inflight = scene._test.getSubmitInflight();
+    assert("submit inflight promise", !!inflight);
+    scene._test.leaveToMenu();
+    assert("menu deferred while submit inflight", menuCalls === 0);
+    assert(
+      "waiting hint while leaving",
+      scene._test.getSubmitStatus().includes("returning"),
+    );
+    resolveSubmit();
+    await inflight;
+    // leaveToMenu's .then(go) runs after the same settlement.
+    await Promise.resolve();
+    assert("menu after submit settles", menuCalls === 1);
+    assert(
+      "saved status",
+      scene._test.getSubmitStatus() === "Score saved as Ace",
+    );
+    scene.exit();
+  }
+
+  // Network / throw path surfaces Submit failed.
+  {
+    const scene = createGameOverScene({
+      canvas: /** @type {any} */ (canvas),
+      ctx: /** @type {any} */ (ctx),
+      input,
+      onRestart() {},
+      onMenu() {},
+      getLastScore: () => 10,
+      viewWidth: 960,
+      viewHeight: 540,
+      loadPlayer: () => ({ id: "p2", nickname: "Bolt" }),
+      submitScore: async () => {
+        throw new Error("fetch failed");
+      },
+    });
+    scene.enter();
+    const inflight = scene._test.getSubmitInflight();
+    await inflight;
+    await Promise.resolve();
+    assert(
+      "network error status",
+      scene._test.getSubmitStatus() === "Submit failed: fetch failed",
+      scene._test.getSubmitStatus(),
+    );
+    scene.exit();
+  }
+
+  // API error body path.
+  {
+    const scene = createGameOverScene({
+      canvas: /** @type {any} */ (canvas),
+      ctx: /** @type {any} */ (ctx),
+      input,
+      onRestart() {},
+      onMenu() {},
+      getLastScore: () => 10,
+      viewWidth: 960,
+      viewHeight: 540,
+      loadPlayer: () => ({ id: "p3", nickname: "Cy" }),
+      submitScore: async () => ({
+        ok: false,
+        status: 404,
+        data: { error: "Player not found", code: "PLAYER_NOT_FOUND" },
+      }),
+    });
+    scene.enter();
+    const inflight = scene._test.getSubmitInflight();
+    await inflight;
+    await Promise.resolve();
+    assert(
+      "API error status",
+      scene._test.getSubmitStatus() === "Submit failed: Player not found",
+      scene._test.getSubmitStatus(),
+    );
+    scene.exit();
+  }
+
+  if (origAdd) win.addEventListener = origAdd;
+  if (origRemove) win.removeEventListener = origRemove;
+})();
 
 if (failed > 0) {
   console.error(`\n${failed} assertion(s) failed`);

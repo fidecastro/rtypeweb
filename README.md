@@ -4,7 +4,7 @@ Vanilla JavaScript shell for an R-Type-style browser game. Static site at the re
 
 ## Requirements
 
-- **Node.js 20+** (see `.nvmrc` and `package.json` `engines`)
+- **Node.js 24.x** (see `.nvmrc` and `package.json` `engines`; required for Vercel builds)
 - npm (comes with Node)
 
 ## Install
@@ -50,12 +50,25 @@ Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?api
 
 - **WASD / arrows** — move (clamped to the camera view band)
 - **Space / Enter** — fire (rate-limited) / confirm on game over
-- **Esc / M** — from game over, return to title menu
+- **Esc / M** — from game over, return to title menu (waits for in-flight score submit so home top 10 can refresh with the new score)
 - **H** — debug: take 1 damage · **G** — debug: +100 score · **B** — debug: skip to current phase boss
 - **1 / 2 / 3 / 4** — debug: force-spawn Tri-beam / Overdrive / Aegis / Surge pickups near the ship
 - Touch: left half steer, right half fire
 
-Health bar, power-up status, score, and **phase label** are drawn on the play HUD. A run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Each phase ends in a **multi-phase boss** (Harvester → Interceptor → Overmind): telegraphed attacks, multi-hit HP, substantial score on defeat, then phase clear / next phase. Beating the final boss **stages clears** the run; boss contact and hazard shots can kill the player (normal invuln window). Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage; at 0 HP → game over. Trash units tagged `enemy` award score on one-shot kills and may drop power-ups; bosses require multiple hits. If `rtypeweb.player.id` is set (Register view), game over / stage clear `POST`s `/api/score` with `{ playerId, value }`.
+Health bar, power-up status, score, and **phase label** are drawn on the play HUD. A run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Each phase ends in a **multi-phase boss** (Harvester → Interceptor → Overmind): telegraphed attacks, multi-hit HP, substantial score on defeat, then phase clear / next phase. Beating the final boss **stages clears** the run; boss contact and hazard shots can kill the player (normal invuln window). Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage; at 0 HP → game over. Trash units tagged `enemy` award score on one-shot kills and may drop power-ups; bosses require multiple hits.
+
+### Registered vs unregistered play
+
+| State | Play | Game over score |
+|-------|------|-----------------|
+| **Registered** (`localStorage` `rtypeweb.player` with `id`) | Full combat | `POST /api/score` with `{ playerId, value }`; status shows *Score saved as …* or *Submit failed: …* (API / network) |
+| **Unregistered** (no profile) | Allowed — no gate | Score is **not** submitted; status *Not registered — score not submitted* |
+
+Home and High Scores always **re-fetch** `GET /api/leaderboard` when those views are shown (including Esc/M back to title after a run).
+
+### API down / static-only
+
+With `npm start` (no API) or a stopped server: title/scores show an error state (*Could not load leaderboard* / network message); register shows a network/API error; **Play still boots** and combat works. Game over for a registered player shows *Submit failed: …* when the score POST cannot reach the API.
 
 Stage / wave data: **`/public/assets/data/stages.json`** (timeline events + per-phase `boss` id). The engine falls back to an in-code default script if the file cannot be loaded.
 
@@ -85,12 +98,26 @@ Original combat upgrades (not copyrighted R-Type assets). Pickups drop from defe
 ### Smoke tests
 
 ```bash
-# Game modules (score, damage, power-ups, enemies, bosses, stage director) — no server
+# Game modules (score, damage, power-ups, enemies, bosses, stage director, game-over submit seams) — no server
 npm run smoke:game
 
 # API (with server listening)
 API_BASE=http://localhost:3000 npm run smoke
 ```
+
+### End-to-end checklist (manual)
+
+With `npm run api` and the browser at [http://localhost:3000](http://localhost:3000):
+
+1. **Home top 10** — open app → title shows Top Scores (empty state or rows), not a hard crash.
+2. **Register** — Register → nickname + email → badge *Playing as …*; profile in `localStorage` key `rtypeweb.player`.
+3. **Play content** — Play → collect **≥1 power-up** and face **≥1 boss** (normal play, or debug: keys `1–4` for pickups, `B` skip to boss).
+4. **Score stored** — die or stage-clear → *Score saved as …* when registered.
+5. **Top 10 reflects run** — Esc/M → title leaderboard includes the new score when it ranks in top 10 (or re-load High Scores).
+6. **Unregistered** — `localStorage.removeItem('rtypeweb.player')` → Play → game over shows *Not registered — score not submitted*, no crash.
+7. **API down** — stop the API / use `npm start` only → leaderboard/register error states; Play still works; registered game over shows *Submit failed: …*.
+
+Scripted coverage for the same loop seams: `npm run smoke:game` (game-over submit/unregistered/network) and `API_BASE=… npm run smoke` (register → score → leaderboard).
 
 ## Player / score API
 
@@ -224,14 +251,16 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── validate.js
 │   └── http.js
 ├── scripts/
-│   ├── local-api.mjs       # Local static (allowlisted) + api/* server
-│   ├── smoke-api.mjs       # HTTP smoke verification
-│   └── smoke-game.mjs      # Client game-module smoke
+│   ├── local-api.mjs              # Local static (allowlisted) + api/* server
+│   ├── prepare-vercel-static.mjs  # npm run build → dist/ for Vercel
+│   ├── smoke-api.mjs              # HTTP smoke verification
+│   └── smoke-game.mjs             # Client game-module smoke
 ├── data/                   # Local SQLite DB (gitignored; not served statically)
+├── dist/                   # Vercel static output (gitignored; from npm run build)
 ├── vercel.json
 ├── package.json
 ├── .env.example
-├── .nvmrc                  # Node 20
+├── .nvmrc                  # Node 24
 └── README.md
 ```
 
@@ -264,13 +293,48 @@ Auth (passwords/OAuth) is out of scope for this slice. Sprites/backgrounds/VFX a
 ## Deploy to Vercel
 
 1. Import this Git repository (or `vercel` / `vercel --prod` from the CLI).
-2. **Root Directory:** repository root. **Framework Preset:** Other / no framework.
+2. **Root Directory:** repository root (this package). **Framework Preset:** Other / no framework.
 3. Set environment variables: `LIBSQL_URL`, `LIBSQL_AUTH_TOKEN` (Turso/libSQL).
 4. Deploy. Static files are served from the root; `api/*.js` become serverless functions.
+
+### Build packaging (static shell + API)
+
+Vercel zero-config would otherwise treat root `public/` as the only static output and **drop** `index.html` + `/src/*`. This repo uses:
+
+```bash
+npm run build   # → scripts/prepare-vercel-static.mjs → dist/
+```
+
+`vercel.json` sets `buildCommand` + `outputDirectory: dist` so production ships:
+
+- `dist/index.html`, `dist/src/**` (menu + engine modules)
+- `dist/public/**` (keeps runtime URLs like `/public/assets/data/stages.json`)
+- `api/*.js` as serverless functions (unchanged)
+
+### Deploy dry-run (no production token required)
+
+Prove packaging locally with the Vercel CLI (devDependency):
+
+```bash
+npm run build
+npx vercel build
+# optional interactive dev that matches production routing more closely:
+# npm run dev:vercel
+```
+
+If the project is not linked, create a local stub once (gitignored under `.vercel/`) or run `vercel link` / set `VERCEL_TOKEN`. Successful `vercel build` writes `.vercel/output` with static files under `static/` and functions under `functions/api/*`. A full `vercel --prod` deploy needs CLI login and a remote Turso DB (`LIBSQL_*`).
 
 ### Production limitation
 
 Without `LIBSQL_URL`, handlers fall back to a local file path. That is fine for `npm run api` on a developer machine; on Vercel it will **not** give a stable shared leaderboard across invocations. Always configure a remote libSQL database for production.
+
+### Where scores are stored
+
+| Environment | Player identity | Scores / leaderboard |
+|-------------|-----------------|----------------------|
+| Browser | `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`) | N/A (client only holds identity) |
+| Local API | — | libSQL file DB default `data/rtype.db` (gitignored; created on first request) |
+| Vercel production | same client key | Remote Turso/libSQL via `LIBSQL_URL` (+ `LIBSQL_AUTH_TOKEN`) |
 
 ## Notes
 
