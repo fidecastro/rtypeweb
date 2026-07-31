@@ -15,9 +15,10 @@ const VIEWS = ['home', 'register', 'scores', 'play'];
 const VIEW_WIDTH = 960;
 const VIEW_HEIGHT = 540;
 
-/** Shared across playing → gameover for last-run score. */
+/** Shared across playing → gameover for last-run score / clear flag. */
 const runState = {
   lastScore: 0,
+  lastCleared: false,
 };
 
 /** @type {string} */
@@ -107,12 +108,13 @@ function ensureEngine() {
   }
 
   /**
-   * @param {{ score?: number }} [payload]
+   * @param {{ score?: number, cleared?: boolean }} [payload]
    */
   function goGameOver(payload) {
     if (payload && typeof payload.score === 'number') {
       runState.lastScore = payload.score;
     }
+    runState.lastCleared = !!(payload && payload.cleared);
     game?.invalidateScene('gameover');
     game?.setScene('gameover');
   }
@@ -147,6 +149,7 @@ function ensureEngine() {
         createGameOverScene({
           ...sceneDeps,
           getLastScore: () => runState.lastScore,
+          getCleared: () => runState.lastCleared,
           onRestart: goPlaying,
           onMenu: goShellMenu,
         }),
