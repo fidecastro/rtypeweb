@@ -4,6 +4,7 @@
  */
 
 import { loadPlayer } from '../player.js';
+import { getAudio } from '../audio.js';
 
 /**
  * @param {object} deps
@@ -24,6 +25,8 @@ export function createMenuScene({
   viewWidth,
   viewHeight,
 }) {
+  const audio = getAudio();
+
   return {
     enter() {
       const player = loadPlayer();
@@ -43,6 +46,7 @@ export function createMenuScene({
      */
     update(_dt) {
       if (input.wasPressed('fire')) {
+        audio.playSfx('ui_confirm');
         onStart();
       }
       input.endFrame();
