@@ -32,6 +32,7 @@ import { createParallaxBackground } from '../game/visuals/background.js';
 import { createFxSystem } from '../game/visuals/fx.js';
 import { enablePixelMode } from '../game/visuals/draw.js';
 import { PALETTE } from '../game/visuals/palette.js';
+import { getAudio } from '../audio.js';
 
 const DEATH_FREEZE_SEC = 0.45;
 const CLEAR_FREEZE_SEC = 1.6;
@@ -60,6 +61,8 @@ export function createPlayingScene({
   viewHeight,
   runState,
 }) {
+  const audio = getAudio();
+
   const camera = createCamera({
     x: 0,
     y: 0,
@@ -197,6 +200,7 @@ export function createPlayingScene({
     encounterBanner = `BOSS — ${String(name).toUpperCase()}`;
     phaseLabel = phase?.label || phaseLabel;
     if (setStatus) setStatus(`Boss: ${name}`);
+    audio.playSfx('boss_alert');
   }
 
   function handleBossOutro(phase, phaseIndex) {
@@ -290,6 +294,8 @@ export function createPlayingScene({
     fx.shake(7, 0.35);
     fx.flashScreen('rgba(248, 113, 113, 0.28)', 0.2);
     if (setStatus) setStatus('Destroyed…');
+    audio.playSfx('death');
+    audio.stopMusic();
   }
 
   /**
@@ -318,8 +324,11 @@ export function createPlayingScene({
         const hasHp = typeof e.hp === 'number' && Number.isFinite(e.hp);
         if (hasHp) {
           e.hp = Math.max(0, e.hp - PROJECTILE_DAMAGE);
-          if (e.hp > 0 && e.baseColor) {
-            e.color = e.openColor || '#fef08a';
+          if (e.hp > 0) {
+            audio.playSfx('hit');
+            if (e.baseColor) {
+              e.color = e.openColor || '#fef08a';
+            }
           }
           if (e.hp <= 0) {
             onEntityKilled(e);
@@ -332,6 +341,7 @@ export function createPlayingScene({
           e.alive = false;
           score.add(SCORE_ENEMY_KILL);
           fx.spawnExplosion(cx, cy, { big: false });
+          audio.playSfx('explosion');
           if (Math.random() < POWERUP_DROP_CHANCE) {
             spawnPowerupAt(randomPowerupType(), dropX, dropY);
           }
@@ -360,6 +370,7 @@ export function createPlayingScene({
       fx.spawnExplosion(cx, cy, { big: true, radius: 36 });
       fx.shake(8, 0.4);
       fx.flashScreen('rgba(250, 204, 21, 0.22)', 0.18);
+      audio.playSfx('explosion');
       if (typeof e.beginDeath === 'function') {
         e.beginDeath();
       } else {
@@ -376,6 +387,7 @@ export function createPlayingScene({
     e.alive = false;
     score.add(SCORE_ENEMY_KILL);
     fx.spawnExplosion(cx, cy, { big: false });
+    audio.playSfx('explosion');
     if (Math.random() < POWERUP_DROP_CHANCE) {
       spawnPowerupAt(randomPowerupType(), dropX, dropY);
     }
@@ -429,9 +441,12 @@ export function createPlayingScene({
         p.y + p.h / 2,
         p.color || PALETTE.collectGlow,
       );
-      if (result.applied && result.label) {
-        collectMessage = `GOT ${result.label.toUpperCase()}`;
-        collectToastTimer = COLLECT_TOAST_SEC;
+      if (result.applied) {
+        audio.playSfx('powerup');
+        if (result.label) {
+          collectMessage = `GOT ${result.label.toUpperCase()}`;
+          collectToastTimer = COLLECT_TOAST_SEC;
+        }
       }
       break;
     }
@@ -664,6 +679,8 @@ export function createPlayingScene({
       };
       window.addEventListener('keydown', onDebugKey);
 
+      // Stage loop after unlock; queues if still locked.
+      audio.playMusic('stage');
       if (setStatus) setStatus('Playing');
     },
 
@@ -673,6 +690,7 @@ export function createPlayingScene({
         window.removeEventListener('keydown', onDebugKey);
         onDebugKey = null;
       }
+      audio.stopMusic();
       entities.clear();
       fx.clear();
       player = null;
@@ -718,9 +736,10 @@ export function createPlayingScene({
 
       if (player) {
         player.updateTimers(dt);
-        const shot = player.tryFire(entities);
-        if (shot) {
-          fx.spawnMuzzleFlash(shot.x, shot.y + shot.h / 2);
+        const fired = player.tryFire(entities);
+        if (fired) {
+          fx.spawnMuzzleFlash(fired.x, fired.y + fired.h / 2);
+          audio.playSfx('shot');
         }
       }
 

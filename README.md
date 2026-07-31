@@ -59,6 +59,10 @@ Health bar, power-up status, score, and **phase label** are drawn on the play HU
 
 Stage / wave data: **`/public/assets/data/stages.json`** (timeline events + per-phase `boss` id). The engine falls back to an in-code default script if the file cannot be loaded.
 
+### Audio
+
+Procedural 16-bit-style SFX and looping menu/stage music via the Web Audio API (`src/audio.js`). Audio unlocks on the first click/keypress (browser autoplay policy). Use **Sound: On/Off** in the header to mute; preference is stored in `localStorage` key `rtypeweb.audio.muted` (`"1"` / `"0"`). Missing or failed audio never blocks gameplay.
+
 ### Power-ups
 
 Original combat upgrades (not copyrighted R-Type assets). Pickups drop from defeated enemies (~30%) and one scripted Tri-beam appears early in each run. Colors differ per type; collecting shows a brief **GOT [NAME]** toast.
@@ -187,6 +191,7 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 ├── index.html              # Title screen / main menu shell + canvas
 ├── src/
 │   ├── main.js             # Views: home, register, scores, play (engine + runState)
+│   ├── audio.js            # Web Audio SFX/music, mute, gesture unlock
 │   ├── api.js              # register / leaderboard / submitScore + loopback apiBase
 │   ├── player.js           # localStorage identity { id, nickname, email }
 │   ├── styles.css          # Retro menu styling
@@ -207,7 +212,7 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Optional image sprites (game uses procedural art)
-│       ├── audio/          # Sound / music
+│       ├── audio/          # Optional external clips (procedural audio by default)
 │       └── data/
 │           └── stages.json # Phase durations + spawn events
 ├── api/                    # Vercel serverless functions
@@ -254,7 +259,7 @@ Player faces / advances **+X (right)**. Camera `x` increases as the playfield st
 - `createStageDirector(stages, hooks)` / `loadStages()` (`src/game/stageDirector.js`)
 - Identity: `loadPlayer()` → use `player.id` as API `playerId` when submitting
 
-Auth (passwords/OAuth) and audio are out of scope for the current combat/visuals slice. Sprites/backgrounds/VFX are procedural pixel-art under `src/game/visuals/` (no external atlas required).
+Auth (passwords/OAuth) is out of scope for this slice. Sprites/backgrounds/VFX are procedural pixel-art under `src/game/visuals/` (no external atlas required). Audio is procedural via `src/audio.js`.
 
 ## Deploy to Vercel
 
