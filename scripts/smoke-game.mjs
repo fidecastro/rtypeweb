@@ -795,6 +795,189 @@ console.log("powerups");
   }
 }
 
+console.log("visuals (sprites / parallax / fx)");
+{
+  const {
+    PALETTE,
+    PIXEL,
+  } = await import("../src/game/visuals/palette.js");
+  const {
+    enablePixelMode,
+    fillBlock,
+    drawPattern,
+    snap,
+  } = await import("../src/game/visuals/draw.js");
+  const {
+    attachSpriteRender,
+    drawEntitySprite,
+    drawPlayerSprite,
+  } = await import("../src/game/visuals/sprites.js");
+  const { createParallaxBackground } = await import(
+    "../src/game/visuals/background.js"
+  );
+  const { createFxSystem } = await import("../src/game/visuals/fx.js");
+
+  assert("palette has player + enemy colors", !!PALETTE.playerBody && !!PALETTE.straightBody);
+  assert("palette has boss colors", !!PALETTE.harvester && !!PALETTE.overmindCore);
+  assert("pixel scale is positive even int", PIXEL >= 2 && PIXEL % 1 === 0);
+  assert("snap rounds to grid", snap(5, 2) === 6 || snap(5, 2) === 4);
+
+  // Minimal canvas-like context (records draw ops; no browser).
+  /** @type {string[]} */
+  const ops = [];
+  const fakeCtx = {
+    fillStyle: "#000",
+    strokeStyle: "#000",
+    lineWidth: 1,
+    imageSmoothingEnabled: true,
+    fillRect(x, y, w, h) {
+      ops.push(`fr:${Math.round(x)},${Math.round(y)},${Math.round(w)},${Math.round(h)}`);
+    },
+    strokeRect() {
+      ops.push("sr");
+    },
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    save() {},
+    restore() {},
+    translate() {},
+    scale() {},
+    setTransform() {},
+    fillText() {},
+  };
+
+  enablePixelMode(fakeCtx);
+  assert("pixel mode disables smoothing", fakeCtx.imageSmoothingEnabled === false);
+
+  fillBlock(fakeCtx, 10, 10, 8, 8, "#fff");
+  assert("fillBlock draws", ops.some((o) => o.startsWith("fr:")));
+
+  ops.length = 0;
+  drawPattern(fakeCtx, 0, 0, ["XX", "X."], { X: "#f00" }, "#f00", 2);
+  assert("drawPattern paints cells", ops.length === 3, `ops=${ops.length}`);
+
+  const camera = createCamera({ x: 0, y: 0, width: 960, height: 540, scrollSpeed: 0 });
+  const { player, entities } = makePlayerHarness();
+  assert("player has customRender", typeof player.customRender === "function");
+  ops.length = 0;
+  player.customRender(fakeCtx, camera);
+  assert("player sprite draws blocks", ops.length > 5, `ops=${ops.length}`);
+
+  const straight = createStraightEnemy({
+    camera,
+    viewWidth: 960,
+    viewHeight: 540,
+    y: 0.5,
+  });
+  assert("straight has customRender", typeof straight.customRender === "function");
+  ops.length = 0;
+  straight.customRender(fakeCtx, camera);
+  assert("straight sprite draws", ops.length > 3);
+
+  const sine = createSineEnemy({ camera, viewWidth: 960, viewHeight: 540, y: 0.4 });
+  assert("sine has customRender", typeof sine.customRender === "function");
+
+  const aimer = createAimerEnemy({ camera, viewWidth: 960, viewHeight: 540, y: 0.4 });
+  assert("aimer has customRender", typeof aimer.customRender === "function");
+
+  const pu = createPowerupPickup({ type: "spread", x: 100, y: 100 });
+  assert("powerup has customRender", typeof pu.customRender === "function");
+  ops.length = 0;
+  pu.customRender(fakeCtx, camera);
+  assert("powerup sprite draws", ops.length > 2);
+
+  for (const kind of BOSS_KINDS) {
+    const boss = createBoss(kind, { camera, viewWidth: 960, viewHeight: 540 });
+    assert(`${kind} boss customRender`, typeof boss.customRender === "function");
+    ops.length = 0;
+    boss.customRender(fakeCtx, camera);
+    assert(`${kind} boss draws multi-block art`, ops.length > 4, `ops=${ops.length}`);
+  }
+
+  const block = createBlockHazard({ camera, viewWidth: 960, viewHeight: 540, y: 0.5 });
+  assert("block hazard customRender", typeof block.customRender === "function");
+
+  const shot = createEnemyProjectile({ x: 50, y: 50 });
+  assert("enemy shot customRender", typeof shot.customRender === "function");
+
+  const proj = attachSpriteRender(
+    { type: "playerProjectile", x: 0, y: 0, w: 12, h: 4, alive: true, color: "#7dd3fc" },
+  );
+  assert("attachSpriteRender sets customRender", typeof proj.customRender === "function");
+  assert("drawEntitySprite player", drawEntitySprite(fakeCtx, player, camera) === true);
+
+  // Parallax background renders without throw.
+  const bg = createParallaxBackground({ viewWidth: 960, viewHeight: 540 });
+  ops.length = 0;
+  bg.render(fakeCtx, camera, 0);
+  assert("parallax draws layers", ops.length > 10, `ops=${ops.length}`);
+  bg.render(fakeCtx, { x: 400 }, 2);
+  assert("parallax accepts phase tint", true);
+
+  // FX system: spawn, update, cap, shake.
+  const fx = createFxSystem();
+  fx.spawnExplosion(100, 100, { big: false });
+  fx.spawnMuzzleFlash(50, 50);
+  fx.spawnHitSpark(60, 60);
+  fx.spawnCollectBurst(70, 70);
+  fx.shake(4, 0.2);
+  fx.flashScreen("rgba(255,255,255,0.2)", 0.1);
+  let st = fx.stats();
+  assert("fx has particles after spawn", st.particles > 0, `p=${st.particles}`);
+  assert("fx has flashes", st.flashes > 0);
+  assert("fx shake active", st.shakeT > 0);
+  assert("fx screen flash active", st.screenFlashT > 0);
+
+  // Cap: flood particles
+  for (let i = 0; i < 200; i++) {
+    fx.spawnSparks(i, i, { count: 2, life: 1 });
+  }
+  st = fx.stats();
+  assert("fx particle cap held", st.particles <= 96, `p=${st.particles}`);
+
+  fx.update(0.05);
+  const off = fx.getShakeOffset();
+  assert(
+    "shake offset finite",
+    Number.isFinite(off.x) && Number.isFinite(off.y),
+  );
+  ops.length = 0;
+  fx.render(fakeCtx, camera);
+  assert("fx render draws", ops.length > 0);
+  fx.renderScreen(fakeCtx, 960, 540);
+  fx.clear();
+  st = fx.stats();
+  assert("fx clear empties", st.particles === 0 && st.flashes === 0 && st.shakeT === 0);
+
+  // Fired projectile also has sprite render (player path).
+  const heldFire = { fire: true, left: false, right: false, up: false, down: false };
+  const inputFire = {
+    isDown(a) {
+      return !!heldFire[a];
+    },
+    wasPressed() {
+      return false;
+    },
+    endFrame() {},
+  };
+  const p2 = createPlayer({
+    camera,
+    input: inputFire,
+    viewWidth: 960,
+    viewHeight: 540,
+  });
+  const list = createEntityList();
+  list.add(p2);
+  const bullet = p2.tryFire(list);
+  assert("player bullet has customRender", !!bullet && typeof bullet.customRender === "function");
+
+  // Silence unused in case tree-shaking analyzers complain in editors.
+  assert("drawPlayerSprite is fn", typeof drawPlayerSprite === "function");
+  assert("entities list ok", entities.length >= 1);
+}
+
 console.log("audio manager (graceful degrade in Node)");
 {
   __setAudioForTests(null);

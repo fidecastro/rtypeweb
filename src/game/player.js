@@ -9,6 +9,7 @@ import {
   RAPID_COOLDOWN_FACTOR,
   SURGE_SPEED_FACTOR,
 } from './powerups.js';
+import { attachSpriteRender } from './visuals/sprites.js';
 
 export const PLAYER_SPEED = 220;
 export const PLAYER_W = 36;
@@ -168,18 +169,20 @@ export function createPlayer({
      * @returns {object}
      */
     _spawnProjectile(entities, x, y, vx, vy) {
-      const projectile = createEntity({
-        type: 'playerProjectile',
-        tags: ['playerProjectile'],
-        x,
-        y,
-        w: PROJECTILE_W,
-        h: PROJECTILE_H,
-        vx,
-        vy,
-        color: '#7dd3fc',
-        despawnWhenOffscreen: true,
-      });
+      const projectile = attachSpriteRender(
+        createEntity({
+          type: 'playerProjectile',
+          tags: ['playerProjectile'],
+          x,
+          y,
+          w: PROJECTILE_W,
+          h: PROJECTILE_H,
+          vx,
+          vy,
+          color: '#7dd3fc',
+          despawnWhenOffscreen: true,
+        }),
+      );
       entities.add(projectile);
       return projectile;
     },
@@ -269,5 +272,5 @@ export function createPlayer({
     },
   });
 
-  return player;
+  return attachSpriteRender(player);
 }

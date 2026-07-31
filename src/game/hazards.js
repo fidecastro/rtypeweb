@@ -6,6 +6,7 @@
 
 import { createEntity } from '../engine/entity.js';
 import { resolveSpawnY, spawnXAtRight } from './enemies.js';
+import { attachSpriteRender } from './visuals/sprites.js';
 
 export const HAZARD_KINDS = ['block', 'spike', 'zone'];
 
@@ -28,22 +29,24 @@ export function createBlockHazard(opts) {
   const destructible = !!opts.destructible;
   const tags = destructible ? ['hazard', 'enemy'] : ['hazard'];
 
-  return createEntity({
-    type: 'obstacle',
-    kind: 'block',
-    tags,
-    x: spawnXAtRight(opts.camera, opts.viewWidth, 8),
-    y,
-    w,
-    h,
-    vx: 0,
-    vy: 0,
-    color: destructible ? '#fbbf24' : '#f87171',
-    // Scroll with world: stay fixed in world X (camera moves past).
-    despawnWhenOffscreen: true,
-    hit: false,
-    destructible,
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'obstacle',
+      kind: 'block',
+      tags,
+      x: spawnXAtRight(opts.camera, opts.viewWidth, 8),
+      y,
+      w,
+      h,
+      vx: 0,
+      vy: 0,
+      color: destructible ? '#fbbf24' : '#f87171',
+      // Scroll with world: stay fixed in world X (camera moves past).
+      despawnWhenOffscreen: true,
+      hit: false,
+      destructible,
+    }),
+  );
 }
 
 /**
@@ -65,21 +68,23 @@ export function createSpikeHazard(opts) {
   const destructible = !!opts.destructible;
   const tags = destructible ? ['hazard', 'enemy'] : ['hazard'];
 
-  return createEntity({
-    type: 'obstacle',
-    kind: 'spike',
-    tags,
-    x: spawnXAtRight(opts.camera, opts.viewWidth, 8),
-    y,
-    w,
-    h,
-    vx: 0,
-    vy: 0,
-    color: destructible ? '#fde047' : '#e11d48',
-    despawnWhenOffscreen: true,
-    hit: false,
-    destructible,
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'obstacle',
+      kind: 'spike',
+      tags,
+      x: spawnXAtRight(opts.camera, opts.viewWidth, 8),
+      y,
+      w,
+      h,
+      vx: 0,
+      vy: 0,
+      color: destructible ? '#fde047' : '#e11d48',
+      despawnWhenOffscreen: true,
+      hit: false,
+      destructible,
+    }),
+  );
 }
 
 /**
@@ -98,20 +103,22 @@ export function createZoneHazard(opts) {
   const h = opts.h ?? 120;
   const y = resolveSpawnY(opts.y, opts.viewHeight, h);
 
-  return createEntity({
-    type: 'hazardZone',
-    kind: 'zone',
-    tags: ['hazard'],
-    x: spawnXAtRight(opts.camera, opts.viewWidth, 8),
-    y,
-    w,
-    h,
-    vx: 0,
-    vy: 0,
-    color: 'rgba(248, 113, 113, 0.55)',
-    despawnWhenOffscreen: true,
-    hit: false,
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'hazardZone',
+      kind: 'zone',
+      tags: ['hazard'],
+      x: spawnXAtRight(opts.camera, opts.viewWidth, 8),
+      y,
+      w,
+      h,
+      vx: 0,
+      vy: 0,
+      color: 'rgba(248, 113, 113, 0.55)',
+      despawnWhenOffscreen: true,
+      hit: false,
+    }),
+  );
 }
 
 /**

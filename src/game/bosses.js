@@ -1,11 +1,17 @@
 /**
  * Multi-phase boss factories for phase-end encounters.
  * Bosses use tags `enemy` + `hazard` + `boss`; multi-hit via numeric `hp`.
- * Shots / zones are `hazard` only (not scoreable). Placeholder colored rects.
+ * Shots / zones are `hazard` only (not scoreable). Pixel-art customRender sprites.
  */
 
 import { createEntity } from '../engine/entity.js';
 import { createEnemyProjectile } from './enemies.js';
+import {
+  attachSpriteRender,
+  drawHarvesterBoss,
+  drawInterceptorBoss,
+  drawOvermindBoss,
+} from './visuals/sprites.js';
 
 /** Boss ids keyed from stages.json / DEFAULT_STAGES. */
 export const BOSS_KINDS = ['harvester', 'interceptor', 'overmind'];
@@ -73,19 +79,21 @@ export function resolveBossKind(idOrIndex) {
  * @returns {object}
  */
 export function createBossProjectile(opts) {
-  return createEntity({
-    type: 'enemyProjectile',
-    kind: 'bossShot',
-    tags: ['hazard'],
-    x: opts.x,
-    y: opts.y,
-    w: opts.w ?? 14,
-    h: opts.h ?? 8,
-    vx: opts.vx ?? -BOSS_SHOT_SPEED,
-    vy: opts.vy ?? 0,
-    color: opts.color ?? '#f472b6',
-    despawnWhenOffscreen: true,
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'enemyProjectile',
+      kind: 'bossShot',
+      tags: ['hazard'],
+      x: opts.x,
+      y: opts.y,
+      w: opts.w ?? 14,
+      h: opts.h ?? 8,
+      vx: opts.vx ?? -BOSS_SHOT_SPEED,
+      vy: opts.vy ?? 0,
+      color: opts.color ?? '#f472b6',
+      despawnWhenOffscreen: true,
+    }),
+  );
 }
 
 /**
@@ -100,28 +108,30 @@ export function createBossProjectile(opts) {
  */
 export function createBossZone(opts) {
   const life = opts.life ?? 1.4;
-  return createEntity({
-    type: 'hazardZone',
-    kind: 'bossZone',
-    tags: ['hazard'],
-    x: opts.x,
-    y: opts.y,
-    w: opts.w ?? 40,
-    h: opts.h ?? 100,
-    vx: opts.vx ?? -30,
-    vy: 0,
-    color: 'rgba(192, 132, 252, 0.55)',
-    despawnWhenOffscreen: true,
-    _life: life,
-    customUpdate(dt) {
-      this._life -= dt;
-      this.x += this.vx * dt;
-      if (this._life <= 0) this.alive = false;
-      // Pulse alpha via color for readability.
-      const a = 0.35 + 0.25 * Math.sin(this._life * 10);
-      this.color = `rgba(192, 132, 252, ${a.toFixed(2)})`;
-    },
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'hazardZone',
+      kind: 'bossZone',
+      tags: ['hazard'],
+      x: opts.x,
+      y: opts.y,
+      w: opts.w ?? 40,
+      h: opts.h ?? 100,
+      vx: opts.vx ?? -30,
+      vy: 0,
+      color: 'rgba(192, 132, 252, 0.55)',
+      despawnWhenOffscreen: true,
+      _life: life,
+      customUpdate(dt) {
+        this._life -= dt;
+        this.x += this.vx * dt;
+        if (this._life <= 0) this.alive = false;
+        // Pulse alpha via color for readability.
+        const a = 0.35 + 0.25 * Math.sin(this._life * 10);
+        this.color = `rgba(192, 132, 252, ${a.toFixed(2)})`;
+      },
+    }),
+  );
 }
 
 /**
@@ -317,6 +327,10 @@ export function createHarvesterBoss(opts) {
       this.vy = 0;
       this.charging = false;
     },
+
+    customRender(ctx2d, cam) {
+      drawHarvesterBoss(ctx2d, this, cam);
+    },
   });
 }
 
@@ -498,6 +512,10 @@ export function createInterceptorBoss(opts) {
       this.vx = 0;
       this.vy = 0;
     },
+
+    customRender(ctx2d, cam) {
+      drawInterceptorBoss(ctx2d, this, cam);
+    },
   });
 }
 
@@ -660,20 +678,7 @@ export function createOvermindBoss(opts) {
     },
 
     customRender(ctx2d, cam) {
-      if (!this.alive) return;
-      const { x, y } = cam.worldToScreen(this.x, this.y);
-      // Shell.
-      ctx2d.fillStyle = this.color;
-      ctx2d.fillRect(x, y, this.w, this.h);
-      // Inner core (readable multi-segment placeholder).
-      const inset = 18;
-      ctx2d.fillStyle = this.bossState === 'fight' ? this.coreColor : '#e9d5ff';
-      ctx2d.fillRect(x + inset, y + inset, this.w - inset * 2, this.h - inset * 2);
-      // Side nodes.
-      ctx2d.fillStyle = '#4c1d95';
-      ctx2d.fillRect(x - 8, y + this.h * 0.2, 12, 16);
-      ctx2d.fillRect(x - 8, y + this.h * 0.65, 12, 16);
-      ctx2d.fillRect(x + this.w - 4, y + this.h * 0.4, 12, 18);
+      drawOvermindBoss(ctx2d, this, cam);
     },
 
     beginDeath() {

@@ -5,6 +5,7 @@
  */
 
 import { createEntity } from '../engine/entity.js';
+import { attachSpriteRender } from './visuals/sprites.js';
 
 export const ENEMY_KINDS = ['straight', 'sine', 'aimer'];
 
@@ -59,19 +60,21 @@ export function createStraightEnemy(opts) {
   const w = opts.w ?? 28;
   const h = opts.h ?? 28;
   const y = resolveSpawnY(opts.y, opts.viewHeight, h);
-  return createEntity({
-    type: 'enemy',
-    kind: 'straight',
-    tags: ['enemy', 'hazard'],
-    x: spawnXAtRight(opts.camera, opts.viewWidth),
-    y,
-    w,
-    h,
-    vx: opts.vx ?? STRAIGHT_VX,
-    vy: 0,
-    color: '#c084fc',
-    despawnWhenOffscreen: true,
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'enemy',
+      kind: 'straight',
+      tags: ['enemy', 'hazard'],
+      x: spawnXAtRight(opts.camera, opts.viewWidth),
+      y,
+      w,
+      h,
+      vx: opts.vx ?? STRAIGHT_VX,
+      vy: 0,
+      color: '#c084fc',
+      despawnWhenOffscreen: true,
+    }),
+  );
 }
 
 /**
@@ -96,34 +99,36 @@ export function createSineEnemy(opts) {
   const frequency = opts.frequency ?? 0.55;
   const viewHeight = opts.viewHeight;
 
-  return createEntity({
-    type: 'enemy',
-    kind: 'sine',
-    tags: ['enemy', 'hazard'],
-    x: spawnXAtRight(opts.camera, opts.viewWidth),
-    y: baseY,
-    w,
-    h,
-    vx: opts.vx ?? SINE_VX,
-    vy: 0,
-    color: '#67e8f9',
-    despawnWhenOffscreen: true,
-    baseY,
-    amplitude,
-    frequency,
-    _sineT: 0,
+  return attachSpriteRender(
+    createEntity({
+      type: 'enemy',
+      kind: 'sine',
+      tags: ['enemy', 'hazard'],
+      x: spawnXAtRight(opts.camera, opts.viewWidth),
+      y: baseY,
+      w,
+      h,
+      vx: opts.vx ?? SINE_VX,
+      vy: 0,
+      color: '#67e8f9',
+      despawnWhenOffscreen: true,
+      baseY,
+      amplitude,
+      frequency,
+      _sineT: 0,
 
-    customUpdate(dt) {
-      this._sineT += dt;
-      this.x += this.vx * dt;
-      const wave = Math.sin(this._sineT * this.frequency * Math.PI * 2) * this.amplitude;
-      this.y = this.baseY + wave;
-      // Soft clamp so sine enemies stay in the play band.
-      const pad = 4;
-      if (this.y < pad) this.y = pad;
-      if (this.y + this.h > viewHeight - pad) this.y = viewHeight - pad - this.h;
-    },
-  });
+      customUpdate(dt) {
+        this._sineT += dt;
+        this.x += this.vx * dt;
+        const wave = Math.sin(this._sineT * this.frequency * Math.PI * 2) * this.amplitude;
+        this.y = this.baseY + wave;
+        // Soft clamp so sine enemies stay in the play band.
+        const pad = 4;
+        if (this.y < pad) this.y = pad;
+        if (this.y + this.h > viewHeight - pad) this.y = viewHeight - pad - this.h;
+      },
+    }),
+  );
 }
 
 /**
@@ -148,54 +153,56 @@ export function createAimerEnemy(opts) {
   const fireInterval = opts.fireInterval ?? AIMER_FIRE_INTERVAL;
   const viewHeight = opts.viewHeight;
 
-  return createEntity({
-    type: 'enemy',
-    kind: 'aimer',
-    tags: ['enemy', 'hazard'],
-    x: spawnXAtRight(opts.camera, opts.viewWidth),
-    y,
-    w,
-    h,
-    vx: opts.vx ?? AIMER_VX,
-    vy: 0,
-    color: '#fb923c',
-    despawnWhenOffscreen: true,
-    trackSpeed,
-    fireInterval,
-    fireCooldown: fireInterval * 0.4,
+  return attachSpriteRender(
+    createEntity({
+      type: 'enemy',
+      kind: 'aimer',
+      tags: ['enemy', 'hazard'],
+      x: spawnXAtRight(opts.camera, opts.viewWidth),
+      y,
+      w,
+      h,
+      vx: opts.vx ?? AIMER_VX,
+      vy: 0,
+      color: '#fb923c',
+      despawnWhenOffscreen: true,
+      trackSpeed,
+      fireInterval,
+      fireCooldown: fireInterval * 0.4,
 
-    customUpdate(dt, ctx) {
-      this.x += this.vx * dt;
+      customUpdate(dt, ctx) {
+        this.x += this.vx * dt;
 
-      const player = ctx?.player;
-      if (player && player.alive && !player.isDead) {
-        const targetY = player.y + player.h / 2 - this.h / 2;
-        const dy = targetY - this.y;
-        const step = this.trackSpeed * dt;
-        if (Math.abs(dy) <= step) {
-          this.y = targetY;
-        } else {
-          this.y += Math.sign(dy) * step;
+        const player = ctx?.player;
+        if (player && player.alive && !player.isDead) {
+          const targetY = player.y + player.h / 2 - this.h / 2;
+          const dy = targetY - this.y;
+          const step = this.trackSpeed * dt;
+          if (Math.abs(dy) <= step) {
+            this.y = targetY;
+          } else {
+            this.y += Math.sign(dy) * step;
+          }
         }
-      }
 
-      const pad = 4;
-      if (this.y < pad) this.y = pad;
-      if (this.y + this.h > viewHeight - pad) this.y = viewHeight - pad - this.h;
+        const pad = 4;
+        if (this.y < pad) this.y = pad;
+        if (this.y + this.h > viewHeight - pad) this.y = viewHeight - pad - this.h;
 
-      this.fireCooldown -= dt;
-      if (this.fireCooldown > 0) return;
-      if (!ctx?.entities) return;
+        this.fireCooldown -= dt;
+        if (this.fireCooldown > 0) return;
+        if (!ctx?.entities) return;
 
-      this.fireCooldown = this.fireInterval;
-      const shot = createEnemyProjectile({
-        x: this.x - 12,
-        y: this.y + this.h / 2 - 3,
-        player,
-      });
-      ctx.entities.add(shot);
-    },
-  });
+        this.fireCooldown = this.fireInterval;
+        const shot = createEnemyProjectile({
+          x: this.x - 12,
+          y: this.y + this.h / 2 - 3,
+          player,
+        });
+        ctx.entities.add(shot);
+      },
+    }),
+  );
 }
 
 /**
@@ -225,19 +232,21 @@ export function createEnemyProjectile(opts) {
     if (vx > -40) vx = -Math.max(ENEMY_SHOT_SPEED * 0.55, Math.abs(vx));
   }
 
-  return createEntity({
-    type: 'enemyProjectile',
-    kind: 'enemyShot',
-    tags: ['hazard'],
-    x: opts.x,
-    y: opts.y,
-    w: 12,
-    h: 6,
-    vx,
-    vy,
-    color: '#fb7185',
-    despawnWhenOffscreen: true,
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'enemyProjectile',
+      kind: 'enemyShot',
+      tags: ['hazard'],
+      x: opts.x,
+      y: opts.y,
+      w: 12,
+      h: 6,
+      vx,
+      vy,
+      color: '#fb7185',
+      despawnWhenOffscreen: true,
+    }),
+  );
 }
 
 /**
