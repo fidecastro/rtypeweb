@@ -28,6 +28,10 @@ import {
   getPowerupHudState,
   randomPowerupType,
 } from '../game/powerups.js';
+import { createParallaxBackground } from '../game/visuals/background.js';
+import { createFxSystem } from '../game/visuals/fx.js';
+import { enablePixelMode } from '../game/visuals/draw.js';
+import { PALETTE } from '../game/visuals/palette.js';
 
 const DEATH_FREEZE_SEC = 0.45;
 const CLEAR_FREEZE_SEC = 1.6;
@@ -66,6 +70,8 @@ export function createPlayingScene({
 
   const entities = createEntityList();
   const score = createRunScore();
+  const background = createParallaxBackground({ viewWidth, viewHeight });
+  const fx = createFxSystem();
   /** @type {ReturnType<typeof createPlayer> | null} */
   let player = null;
   /** @type {ReturnType<typeof createStageDirector> | null} */
@@ -276,6 +282,13 @@ export function createPlayingScene({
     flashT = 0;
     deathTimer = DEATH_FREEZE_SEC;
     encounterBanner = '';
+    if (player) {
+      fx.spawnExplosion(player.x + player.w / 2, player.y + player.h / 2, {
+        big: true,
+      });
+    }
+    fx.shake(7, 0.35);
+    fx.flashScreen('rgba(248, 113, 113, 0.28)', 0.2);
     if (setStatus) setStatus('Destroyed…');
   }
 
@@ -300,6 +313,7 @@ export function createPlayingScene({
         if (!aabbOverlap(proj, e)) continue;
 
         proj.alive = false;
+        fx.spawnHitSpark(proj.x + proj.w / 2, proj.y + proj.h / 2);
 
         const hasHp = typeof e.hp === 'number' && Number.isFinite(e.hp);
         if (hasHp) {
@@ -313,8 +327,11 @@ export function createPlayingScene({
         } else {
           const dropX = e.x;
           const dropY = e.y;
+          const cx = dropX + e.w / 2;
+          const cy = dropY + e.h / 2;
           e.alive = false;
           score.add(SCORE_ENEMY_KILL);
+          fx.spawnExplosion(cx, cy, { big: false });
           if (Math.random() < POWERUP_DROP_CHANCE) {
             spawnPowerupAt(randomPowerupType(), dropX, dropY);
           }
@@ -329,6 +346,8 @@ export function createPlayingScene({
    */
   function onEntityKilled(e) {
     const isBoss = e.tags?.has('boss') || e.type === 'boss';
+    const cx = e.x + e.w / 2;
+    const cy = e.y + e.h / 2;
     if (isBoss) {
       if (!bossScoreAwarded) {
         bossScoreAwarded = true;
@@ -338,6 +357,9 @@ export function createPlayingScene({
             : bossScoreFor(e.kind);
         score.add(pts);
       }
+      fx.spawnExplosion(cx, cy, { big: true, radius: 36 });
+      fx.shake(8, 0.4);
+      fx.flashScreen('rgba(250, 204, 21, 0.22)', 0.18);
       if (typeof e.beginDeath === 'function') {
         e.beginDeath();
       } else {
@@ -353,6 +375,7 @@ export function createPlayingScene({
     const dropY = e.y;
     e.alive = false;
     score.add(SCORE_ENEMY_KILL);
+    fx.spawnExplosion(cx, cy, { big: false });
     if (Math.random() < POWERUP_DROP_CHANCE) {
       spawnPowerupAt(randomPowerupType(), dropX, dropY);
     }
@@ -366,15 +389,27 @@ export function createPlayingScene({
       // Dying / intro bosses do not deal contact damage.
       if (e.bossState === 'dying' || e.bossState === 'intro') continue;
       if (aabbOverlap(player, e)) {
+        const aegisBefore = player.aegisCharges ?? 0;
         const applied = player.takeDamage(1);
         if (applied) {
           e.hit = true;
           if (e.type === 'obstacle' || e.kind === 'block' || e.kind === 'spike') {
             e.color = '#fbbf24';
           }
+          fx.spawnHitSpark(player.x + player.w / 2, player.y + player.h / 2);
+          fx.shake(5, 0.2);
+          fx.flashScreen('rgba(248, 113, 113, 0.16)', 0.1);
           if (player.isDead || player.hp <= 0) {
             handlePlayerDeath();
           }
+        } else if ((player.aegisCharges ?? 0) < aegisBefore) {
+          // Aegis charge consumed: brief shield spark (once per absorb).
+          fx.spawnSparks(player.x + player.w / 2, player.y + player.h / 2, {
+            count: 6,
+            color: PALETTE.puAegis,
+            speed: 100,
+            life: 0.25,
+          });
         }
         break;
       }
@@ -389,31 +424,17 @@ export function createPlayingScene({
       if (!aabbOverlap(player, p)) continue;
       const result = applyPowerup(player, p.powerupType);
       p.alive = false;
+      fx.spawnCollectBurst(
+        p.x + p.w / 2,
+        p.y + p.h / 2,
+        p.color || PALETTE.collectGlow,
+      );
       if (result.applied && result.label) {
         collectMessage = `GOT ${result.label.toUpperCase()}`;
         collectToastTimer = COLLECT_TOAST_SEC;
       }
       break;
     }
-  }
-
-  function drawGrid() {
-    const step = 64;
-    const startX = Math.floor(camera.x / step) * step;
-    const endX = camera.x + camera.width + step;
-    ctx.strokeStyle = 'rgba(80, 120, 160, 0.25)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let wx = startX; wx <= endX; wx += step) {
-      const sx = wx - camera.x;
-      ctx.moveTo(sx, 0);
-      ctx.lineTo(sx, camera.height);
-    }
-    for (let wy = 0; wy <= camera.height; wy += step) {
-      ctx.moveTo(0, wy);
-      ctx.lineTo(camera.width, wy);
-    }
-    ctx.stroke();
   }
 
   function drawHealthBar(hp, maxHp) {
@@ -481,10 +502,10 @@ export function createPlayingScene({
       const ang = t * 2.4 + (i * Math.PI * 2) / Math.max(charges, 1);
       const ox = cx + Math.cos(ang) * orbitR;
       const oy = cy + Math.sin(ang) * orbitR;
+      ctx.fillStyle = PALETTE.puFrame;
+      ctx.fillRect(Math.round(ox - 5), Math.round(oy - 5), 10, 10);
       ctx.fillStyle = POWERUP_TYPES.aegis.color;
-      ctx.fillRect(ox - 4, oy - 4, 8, 8);
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.strokeRect(ox - 4, oy - 4, 8, 8);
+      ctx.fillRect(Math.round(ox - 3), Math.round(oy - 3), 6, 6);
     }
   }
 
@@ -592,6 +613,7 @@ export function createPlayingScene({
       bossScoreAwarded = false;
       collectMessage = '';
       collectToastTimer = 0;
+      fx.clear();
       score.reset();
       if (runState) runState.lastScore = 0;
       spawnPlayer();
@@ -652,6 +674,7 @@ export function createPlayingScene({
         onDebugKey = null;
       }
       entities.clear();
+      fx.clear();
       player = null;
       director = null;
       phaseLabel = '';
@@ -667,6 +690,7 @@ export function createPlayingScene({
     update(dt) {
       if (frozen) {
         flashT += dt;
+        fx.update(dt);
         if (pendingGameOver || pendingStageClear) {
           deathTimer -= dt;
           if (deathTimer <= 0) {
@@ -694,7 +718,10 @@ export function createPlayingScene({
 
       if (player) {
         player.updateTimers(dt);
-        player.tryFire(entities);
+        const shot = player.tryFire(entities);
+        if (shot) {
+          fx.spawnMuzzleFlash(shot.x, shot.y + shot.h / 2);
+        }
       }
 
       if (director) {
@@ -711,6 +738,7 @@ export function createPlayingScene({
       resolvePowerupCollect();
       resolveHazardDamage();
 
+      fx.update(dt);
       input.endFrame();
     },
 
@@ -722,13 +750,21 @@ export function createPlayingScene({
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       const dpr = canvas.width / viewWidth;
       ctx.scale(dpr, dpr);
+      enablePixelMode(ctx);
 
-      ctx.fillStyle = '#0b1220';
-      ctx.fillRect(0, 0, viewWidth, viewHeight);
+      const phaseIndex = director?.getPhaseIndex?.() ?? 0;
+      background.render(ctx, camera, phaseIndex);
 
-      drawGrid();
+      // Subtle screen shake on the world layer (HUD stays stable).
+      const shake = fx.getShakeOffset();
+      ctx.save();
+      if (shake.x || shake.y) {
+        ctx.translate(Math.round(shake.x), Math.round(shake.y));
+      }
+
       entities.renderAll(ctx, camera);
       drawAegisOrbiter();
+      fx.render(ctx, camera);
 
       if (
         player &&
@@ -739,9 +775,13 @@ export function createPlayingScene({
       ) {
         const sx = player.x - camera.x;
         const sy = player.y - camera.y;
-        ctx.fillStyle = 'rgba(250, 204, 21, 0.35)';
+        ctx.fillStyle = PALETTE.hitFlash;
         ctx.fillRect(sx - 2, sy - 2, player.w + 4, player.h + 4);
       }
+
+      ctx.restore(); // end shake
+
+      fx.renderScreen(ctx, viewWidth, viewHeight);
 
       if (pendingGameOver && Math.floor(flashT * 8) % 2 === 0) {
         ctx.fillStyle = 'rgba(248, 113, 113, 0.14)';

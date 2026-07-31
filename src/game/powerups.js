@@ -22,6 +22,7 @@
  */
 
 import { createEntity } from '../engine/entity.js';
+import { attachSpriteRender } from './visuals/sprites.js';
 
 /** @typedef {'spread' | 'rapid' | 'aegis' | 'surge'} PowerupTypeId */
 
@@ -103,19 +104,21 @@ export function createPowerupPickup({ type, x, y, w = POWERUP_SIZE, h = POWERUP_
     throw new Error(`Unknown power-up type: ${type}`);
   }
   const meta = POWERUP_TYPES[type];
-  return createEntity({
-    type: 'powerup',
-    tags: ['pickup', 'powerup'],
-    powerupType: type,
-    x,
-    y,
-    w,
-    h,
-    vx: POWERUP_DRIFT_VX,
-    vy: 0,
-    color: meta.color,
-    despawnWhenOffscreen: true,
-  });
+  return attachSpriteRender(
+    createEntity({
+      type: 'powerup',
+      tags: ['pickup', 'powerup'],
+      powerupType: type,
+      x,
+      y,
+      w,
+      h,
+      vx: POWERUP_DRIFT_VX,
+      vy: 0,
+      color: meta.color,
+      despawnWhenOffscreen: true,
+    }),
+  );
 }
 
 /**

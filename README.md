@@ -23,7 +23,7 @@ npm run api
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` with combat: clamped ship, primary fire, health gauge, score HUD, multi-phase enemy waves / hazards (from `public/assets/data/stages.json`), phase label on the HUD, and game-over score submit when registered.
+**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` with combat: 16-bit-style ship/enemy/boss sprites, layered parallax background, combat VFX (muzzle flash, hit sparks, explosions, light screen shake), clamped ship, primary fire, health gauge, score HUD, multi-phase enemy waves / hazards (from `public/assets/data/stages.json`), phase label on the HUD, and game-over score submit when registered.
 
 ### Static only
 
@@ -198,14 +198,15 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   │   ├── hazards.js      # Block / spike / zone factories
 │   │   ├── powerups.js     # Tri-beam / Overdrive / Aegis / Surge
 │   │   ├── bosses.js       # Phase-end multi-phase bosses
-│   │   └── stageDirector.js # JSON timeline multi-phase director + boss gate
+│   │   ├── stageDirector.js # JSON timeline multi-phase director + boss gate
+│   │   └── visuals/        # 16-bit palette, sprites, parallax, VFX
 │   └── scenes/
 │       ├── menu.js         # In-engine menu stub
 │       ├── playing.js      # Combat, waves, bosses, power-ups, HUD
 │       └── gameover.js     # Final score / stage clear, submit, retry / title
 ├── public/
 │   └── assets/
-│       ├── sprites/        # Sprite images
+│       ├── sprites/        # Optional image sprites (game uses procedural art)
 │       ├── audio/          # Sound / music
 │       └── data/
 │           └── stages.json # Phase durations + spawn events
@@ -253,7 +254,7 @@ Player faces / advances **+X (right)**. Camera `x` increases as the playfield st
 - `createStageDirector(stages, hooks)` / `loadStages()` (`src/game/stageDirector.js`)
 - Identity: `loadPlayer()` → use `player.id` as API `playerId` when submitting
 
-Auth (passwords/OAuth), boss fights, powerup catalog, and final art/audio polish are out of scope for this slice.
+Auth (passwords/OAuth) and audio are out of scope for the current combat/visuals slice. Sprites/backgrounds/VFX are procedural pixel-art under `src/game/visuals/` (no external atlas required).
 
 ## Deploy to Vercel
 
