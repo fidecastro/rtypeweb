@@ -23,7 +23,7 @@ npm run api
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` with combat: clamped ship, primary fire, health gauge, score HUD, hazards, and game-over score submit when registered.
+**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` with combat: clamped ship, primary fire, health gauge, score HUD, multi-phase enemy waves / hazards (from `public/assets/data/stages.json`), phase label on the HUD, and game-over score submit when registered.
 
 ### Static only
 
@@ -54,12 +54,14 @@ Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?api
 - **H** — debug: take 1 damage · **G** — debug: +100 score
 - Touch: left half steer, right half fire
 
-Health bar and score are drawn on the play HUD. Hazards deal damage with a short invulnerability window; at 0 HP → game over. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+Health bar, score, and **phase label** are drawn on the play HUD. A continuous run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage with a short invulnerability window; at 0 HP → game over. Destroying units tagged `enemy` awards score. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+
+Stage / wave data: **`/public/assets/data/stages.json`** (timeline events per phase). The engine falls back to an in-code default script if the file cannot be loaded.
 
 ### Smoke tests
 
 ```bash
-# Game modules (score, damage, fire cooldown) — no server
+# Game modules (score, damage, enemies, stage director) — no server
 npm run smoke:game
 
 # API (with server listening)
@@ -171,16 +173,20 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── engine/             # Fixed-timestep loop, input, camera, entities
 │   ├── game/
 │   │   ├── player.js       # Ship movement, HP, fire cooldown
-│   │   └── score.js        # Per-run score API
+│   │   ├── score.js        # Per-run score API
+│   │   ├── enemies.js      # Straight / sine / aimer factories
+│   │   ├── hazards.js      # Block / spike / zone factories
+│   │   └── stageDirector.js # JSON timeline multi-phase director
 │   └── scenes/
 │       ├── menu.js         # In-engine menu stub
-│       ├── playing.js      # Combat, HUD, hazards
+│       ├── playing.js      # Combat, waves, HUD, hazards
 │       └── gameover.js     # Final score, submit, retry / title
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
 │       ├── audio/          # Sound / music
-│       └── data/           # Level / config data
+│       └── data/
+│           └── stages.json # Phase durations + spawn events
 ├── api/                    # Vercel serverless functions
 │   ├── register.js         # POST /api/register
 │   ├── score.js            # POST /api/score
@@ -220,9 +226,11 @@ Player faces / advances **+X (right)**. Camera `x` increases as the playfield st
 
 - `player.takeDamage(n)` / `player.heal(n)` on the ship controller (`src/game/player.js`)
 - `createRunScore()` → `add(points)`, `get()`, `reset()` (`src/game/score.js`)
+- `spawnEnemy(kind, opts)` / `spawnHazard(kind, opts)` (`src/game/enemies.js`, `src/game/hazards.js`)
+- `createStageDirector(stages, hooks)` / `loadStages()` (`src/game/stageDirector.js`)
 - Identity: `loadPlayer()` → use `player.id` as API `playerId` when submitting
 
-Auth (passwords/OAuth) and full enemy roster / VFX packs are out of scope for this slice.
+Auth (passwords/OAuth), boss fights, powerup catalog, and final art/audio polish are out of scope for this slice.
 
 ## Deploy to Vercel
 
