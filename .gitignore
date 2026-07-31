@@ -5,6 +5,7 @@ node_modules/
 .env
 .env.*
 !.env.example
-data/
+# Local SQLite DB directory (repo root only — not public/assets/data/)
+/data/
 *.db
 *.db-*

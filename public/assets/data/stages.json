@@ -1,0 +1,75 @@
+{
+  "phases": [
+    {
+      "id": "phase-1",
+      "label": "Approach",
+      "durationSec": 22,
+      "scrollSpeed": 90,
+      "events": [
+        { "at": 0.4, "spawn": "hazard", "kind": "block", "y": 0.38 },
+        { "at": 1.5, "spawn": "enemy", "kind": "straight", "y": 0.28 },
+        { "at": 3.2, "spawn": "enemy", "kind": "straight", "y": 0.62 },
+        { "at": 5.0, "spawn": "hazard", "kind": "spike", "y": 0.72 },
+        { "at": 6.5, "spawn": "enemy", "kind": "sine", "y": 0.48, "amplitude": 42 },
+        { "at": 9.0, "spawn": "enemy", "kind": "straight", "y": 0.35 },
+        { "at": 11.0, "spawn": "hazard", "kind": "block", "y": 0.55 },
+        { "at": 12.5, "spawn": "enemy", "kind": "sine", "y": 0.6, "amplitude": 38 },
+        { "at": 15.0, "spawn": "enemy", "kind": "straight", "y": 0.42 },
+        { "at": 17.5, "spawn": "enemy", "kind": "aimer", "y": 0.5 },
+        { "at": 19.5, "spawn": "hazard", "kind": "spike", "y": 0.25 }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "label": "Intercept",
+      "durationSec": 26,
+      "scrollSpeed": 108,
+      "events": [
+        { "at": 0.5, "spawn": "enemy", "kind": "sine", "y": 0.25, "amplitude": 52 },
+        { "at": 1.5, "spawn": "enemy", "kind": "sine", "y": 0.72, "amplitude": 48 },
+        { "at": 3.0, "spawn": "hazard", "kind": "zone", "y": 0.5 },
+        { "at": 4.5, "spawn": "enemy", "kind": "aimer", "y": 0.45 },
+        { "at": 6.5, "spawn": "enemy", "kind": "straight", "y": 0.3 },
+        { "at": 7.5, "spawn": "enemy", "kind": "straight", "y": 0.7 },
+        { "at": 9.0, "spawn": "hazard", "kind": "block", "y": 0.2 },
+        { "at": 10.5, "spawn": "enemy", "kind": "sine", "y": 0.55, "amplitude": 58 },
+        { "at": 12.5, "spawn": "enemy", "kind": "aimer", "y": 0.35 },
+        { "at": 14.0, "spawn": "hazard", "kind": "spike", "y": 0.78 },
+        { "at": 15.5, "spawn": "enemy", "kind": "straight", "y": 0.5 },
+        { "at": 17.0, "spawn": "enemy", "kind": "sine", "y": 0.4, "amplitude": 45 },
+        { "at": 19.0, "spawn": "enemy", "kind": "aimer", "y": 0.6 },
+        { "at": 21.0, "spawn": "hazard", "kind": "zone", "y": 0.4 },
+        { "at": 23.0, "spawn": "enemy", "kind": "straight", "y": 0.55 }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "label": "Assault",
+      "durationSec": 30,
+      "scrollSpeed": 125,
+      "events": [
+        { "at": 0.3, "spawn": "enemy", "kind": "aimer", "y": 0.28 },
+        { "at": 1.2, "spawn": "enemy", "kind": "aimer", "y": 0.72 },
+        { "at": 2.5, "spawn": "hazard", "kind": "block", "y": 0.48 },
+        { "at": 3.5, "spawn": "enemy", "kind": "sine", "y": 0.5, "amplitude": 64 },
+        { "at": 5.0, "spawn": "enemy", "kind": "straight", "y": 0.18 },
+        { "at": 5.8, "spawn": "enemy", "kind": "straight", "y": 0.82 },
+        { "at": 7.0, "spawn": "hazard", "kind": "spike", "y": 0.12 },
+        { "at": 7.8, "spawn": "hazard", "kind": "spike", "y": 0.88 },
+        { "at": 9.0, "spawn": "enemy", "kind": "aimer", "y": 0.5 },
+        { "at": 10.5, "spawn": "enemy", "kind": "sine", "y": 0.32, "amplitude": 50 },
+        { "at": 12.0, "spawn": "hazard", "kind": "zone", "y": 0.55 },
+        { "at": 13.5, "spawn": "enemy", "kind": "straight", "y": 0.45 },
+        { "at": 14.5, "spawn": "enemy", "kind": "straight", "y": 0.65 },
+        { "at": 16.0, "spawn": "enemy", "kind": "aimer", "y": 0.4 },
+        { "at": 17.5, "spawn": "enemy", "kind": "sine", "y": 0.6, "amplitude": 70 },
+        { "at": 19.0, "spawn": "hazard", "kind": "block", "y": 0.3 },
+        { "at": 20.5, "spawn": "enemy", "kind": "aimer", "y": 0.55 },
+        { "at": 22.0, "spawn": "enemy", "kind": "sine", "y": 0.45, "amplitude": 55 },
+        { "at": 24.0, "spawn": "hazard", "kind": "spike", "y": 0.5 },
+        { "at": 25.5, "spawn": "enemy", "kind": "straight", "y": 0.35 },
+        { "at": 27.0, "spawn": "enemy", "kind": "aimer", "y": 0.68 }
+      ]
+    }
+  ]
+}

@@ -23,7 +23,7 @@ npm run api
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` with combat: clamped ship, primary fire, health gauge, score HUD, hazards, and game-over score submit when registered.
+**Expected result:** title screen with **Top Scores** (empty state or rows), main menu (**Title / Play / Register / High Scores**). Register saves a player to `localStorage` key `rtypeweb.player` (`id`, `nickname`, `email`). Play boots the canvas engine into `#game` with combat: clamped ship, primary fire, health gauge, score HUD, multi-phase enemy waves / hazards (from `public/assets/data/stages.json`), phase label on the HUD, and game-over score submit when registered.
 
 ### Static only
 
@@ -55,7 +55,9 @@ Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?api
 - **1 / 2 / 3 / 4** — debug: force-spawn Tri-beam / Overdrive / Aegis / Surge pickups near the ship
 - Touch: left half steer, right half fire
 
-Health bar, power-up status, and score are drawn on the play HUD. Hazards deal damage with a short invulnerability window; at 0 HP → game over. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+Health bar, power-up status, score, and **phase label** are drawn on the play HUD. A continuous run advances through multiple phases (Approach → Intercept → Assault) with rising scroll speed and denser spawns. Enemy kinds include straight flyers, sine movers, and aimers (contact + hazard shots). Terrain hazards (blocks, spikes, zones) deal damage with a short invulnerability window; at 0 HP → game over. Destroying units tagged `enemy` awards score. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+
+Stage / wave data: **`/public/assets/data/stages.json`** (timeline events per phase). The engine falls back to an in-code default script if the file cannot be loaded.
 
 ### Power-ups
 
@@ -65,13 +67,13 @@ Original combat upgrades (not copyrighted R-Type assets). Pickups drop from defe
 |-----|-----|------|--------|
 | `1` | `spread` | **Tri-beam** | Primary fire launches 3 projectiles (center + ±12°) |
 | `2` | `rapid` | **Overdrive** | Fire cooldown ×0.45 (faster single stream) |
-| `3` | `aegis` | **Aegis shell** | +1 absorb charge (next hazard hit negated); orbiting squares show charges |
+| `3` | `aegis` | **Aegis shell** | +1 absorb charge (next hazard hit negated + brief invuln so one contact = one charge); orbiting squares show charges |
 | `4` | `surge` | **Surge thrusters** | Move speed ×1.45 for 12s |
 
 **Stacking / replacement rules** (also documented in `src/game/powerups.js`):
 
 1. **Weapon modes** (`spread` / `rapid`) are mutually exclusive — collecting one **replaces** the other. Default is base single-shot / normal cooldown. Not timed.
-2. **Aegis** is independent of weapon mode. Each pickup adds **+1** charge, **max 2**. At cap, further pickups do not increase charges. Charges last until consumed or death.
+2. **Aegis** is independent of weapon mode. Each pickup adds **+1** charge, **max 2**. At cap, further pickups do not increase charges. Charges last until consumed or death. Absorb grants the same short invulnerability window as a normal hit so continuous overlap spends **one charge per contact**, not per frame.
 3. **Surge** is independent of weapon and aegis. Re-collect **refreshes** the 12s timer; multipliers do not stack.
 4. **Death / new run** clears all power-up state with the player entity.
 5. **Controls** stay the same; only fire pattern/rate, absorb, and move speed change.
@@ -79,7 +81,7 @@ Original combat upgrades (not copyrighted R-Type assets). Pickups drop from defe
 ### Smoke tests
 
 ```bash
-# Game modules (score, damage, fire cooldown, power-ups) — no server
+# Game modules (score, damage, power-ups, enemies, stage director) — no server
 npm run smoke:game
 
 # API (with server listening)
@@ -190,18 +192,21 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── styles.css          # Retro menu styling
 │   ├── engine/             # Fixed-timestep loop, input, camera, entities
 │   ├── game/
-│   │   ├── player.js       # Ship movement, HP, fire, power-up state
-│   │   ├── powerups.js     # Pickup types, apply rules, HUD snapshot
-│   │   └── score.js        # Per-run score API
+│   │   ├── player.js       # Ship movement, HP, fire cooldown
+│   │   ├── score.js        # Per-run score API
+│   │   ├── enemies.js      # Straight / sine / aimer factories
+│   │   ├── hazards.js      # Block / spike / zone factories
+│   │   └── stageDirector.js # JSON timeline multi-phase director
 │   └── scenes/
 │       ├── menu.js         # In-engine menu stub
-│       ├── playing.js      # Combat, HUD, hazards, power-up drops
+│       ├── playing.js      # Combat, waves, HUD, hazards
 │       └── gameover.js     # Final score, submit, retry / title
 ├── public/
 │   └── assets/
 │       ├── sprites/        # Sprite images
 │       ├── audio/          # Sound / music
-│       └── data/           # Level / config data
+│       └── data/
+│           └── stages.json # Phase durations + spawn events
 ├── api/                    # Vercel serverless functions
 │   ├── register.js         # POST /api/register
 │   ├── score.js            # POST /api/score
@@ -241,9 +246,12 @@ Player faces / advances **+X (right)**. Camera `x` increases as the playfield st
 
 - `player.takeDamage(n)` / `player.heal(n)` on the ship controller (`src/game/player.js`)
 - `createRunScore()` → `add(points)`, `get()`, `reset()` (`src/game/score.js`)
+- `spawnEnemy(kind, opts)` / `spawnHazard(kind, opts)` (`src/game/enemies.js`, `src/game/hazards.js`)
+- `applyPowerup(player, type)` / `createPowerupPickup({ type, x, y })` (`src/game/powerups.js`)
+- `createStageDirector(stages, hooks)` / `loadStages()` (`src/game/stageDirector.js`)
 - Identity: `loadPlayer()` → use `player.id` as API `playerId` when submitting
 
-Auth (passwords/OAuth) and full enemy roster / VFX packs are out of scope for this slice.
+Auth (passwords/OAuth), boss fights, powerup catalog, and final art/audio polish are out of scope for this slice.
 
 ## Deploy to Vercel
 
