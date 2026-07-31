@@ -52,14 +52,34 @@ Only loopback hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; remote `?api
 - **Space / Enter** — fire (rate-limited) / confirm on game over
 - **Esc / M** — from game over, return to title menu
 - **H** — debug: take 1 damage · **G** — debug: +100 score
+- **1 / 2 / 3 / 4** — debug: force-spawn Tri-beam / Overdrive / Aegis / Surge pickups near the ship
 - Touch: left half steer, right half fire
 
-Health bar and score are drawn on the play HUD. Hazards deal damage with a short invulnerability window; at 0 HP → game over. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+Health bar, power-up status, and score are drawn on the play HUD. Hazards deal damage with a short invulnerability window; at 0 HP → game over. If `rtypeweb.player.id` is set (Register view), game over `POST`s `/api/score` with `{ playerId, value }`.
+
+### Power-ups
+
+Original combat upgrades (not copyrighted R-Type assets). Pickups drop from defeated enemies (~30%) and one scripted Tri-beam appears early in each run. Colors differ per type; collecting shows a brief **GOT [NAME]** toast.
+
+| Key | Id | Name | Effect |
+|-----|-----|------|--------|
+| `1` | `spread` | **Tri-beam** | Primary fire launches 3 projectiles (center + ±12°) |
+| `2` | `rapid` | **Overdrive** | Fire cooldown ×0.45 (faster single stream) |
+| `3` | `aegis` | **Aegis shell** | +1 absorb charge (next hazard hit negated); orbiting squares show charges |
+| `4` | `surge` | **Surge thrusters** | Move speed ×1.45 for 12s |
+
+**Stacking / replacement rules** (also documented in `src/game/powerups.js`):
+
+1. **Weapon modes** (`spread` / `rapid`) are mutually exclusive — collecting one **replaces** the other. Default is base single-shot / normal cooldown. Not timed.
+2. **Aegis** is independent of weapon mode. Each pickup adds **+1** charge, **max 2**. At cap, further pickups do not increase charges. Charges last until consumed or death.
+3. **Surge** is independent of weapon and aegis. Re-collect **refreshes** the 12s timer; multipliers do not stack.
+4. **Death / new run** clears all power-up state with the player entity.
+5. **Controls** stay the same; only fire pattern/rate, absorb, and move speed change.
 
 ### Smoke tests
 
 ```bash
-# Game modules (score, damage, fire cooldown) — no server
+# Game modules (score, damage, fire cooldown, power-ups) — no server
 npm run smoke:game
 
 # API (with server listening)
@@ -170,11 +190,12 @@ Covers register, re-register, conflict, scores, leaderboard order, invalid input
 │   ├── styles.css          # Retro menu styling
 │   ├── engine/             # Fixed-timestep loop, input, camera, entities
 │   ├── game/
-│   │   ├── player.js       # Ship movement, HP, fire cooldown
+│   │   ├── player.js       # Ship movement, HP, fire, power-up state
+│   │   ├── powerups.js     # Pickup types, apply rules, HUD snapshot
 │   │   └── score.js        # Per-run score API
 │   └── scenes/
 │       ├── menu.js         # In-engine menu stub
-│       ├── playing.js      # Combat, HUD, hazards
+│       ├── playing.js      # Combat, HUD, hazards, power-up drops
 │       └── gameover.js     # Final score, submit, retry / title
 ├── public/
 │   └── assets/
